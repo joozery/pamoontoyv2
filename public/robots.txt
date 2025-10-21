@@ -1,0 +1,13 @@
+# PAMOON - Robots.txt
+
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /admin/*
+
+# Sitemap
+Sitemap: https://pamoon.com/sitemap.xml
+
+# Crawl Delay
+Crawl-delay: 1
+

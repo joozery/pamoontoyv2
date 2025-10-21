@@ -1,0 +1,29 @@
+{
+  "name": "PAMOON - แพลตฟอร์มประมูลสินค้าออนไลน์",
+  "short_name": "PAMOON",
+  "description": "แพลตฟอร์มประมูลสินค้าออนไลน์ พบกับสินค้าหายากและของสะสมสุดล้ำค่า",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#111827",
+  "background_color": "#ffffff",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/pamoontoy.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/pamoontoy.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["shopping", "auction", "collectibles"],
+  "lang": "th",
+  "dir": "ltr"
+}
+
