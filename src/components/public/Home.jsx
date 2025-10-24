@@ -1,28 +1,122 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from '@/components/ui/use-toast';
-import { Search, Bell, CheckCircle, ShoppingBag, Heart, User, LogOut, Package, Baby, Users, CreditCard, Plane, Gem, BookOpen, Gamepad2, Gift, Clock, Car, Ticket, Armchair, Cpu } from 'lucide-react';
+import { Heart, Clock, Gavel } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import SplitText from '../SplitText';
 import LiquidEther from '@/components/LiquidEther';
-import pamoonLogo from '@/assets/pamoontoy.png';
+import { useProducts } from '@/hooks/useProducts';
+import { apiService } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+import timezone from 'dayjs/plugin/timezone';
 
-const CountdownTimer = ({ endTime }) => {
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const CountdownTimer = ({ endTime, auctionStart, auctionEnd }) => {
   const [timeLeft, setTimeLeft] = useState('');
+  const [auctionStatus, setAuctionStatus] = useState('waiting'); // waiting, active, ended
+  const [isClosingSoon, setIsClosingSoon] = useState(false); // ปิดในวันนี้หรือใกล้ปิด (< 24 ชม.)
 
   useEffect(() => {
     const calculateTimeLeft = () => {
-      const difference = new Date(endTime) - new Date();
-      
-      if (difference > 0) {
-        const hours = Math.floor(difference / (1000 * 60 * 60));
-        const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((difference % (1000 * 60)) / 1000);
+      try {
+        // ✅ ตรวจสอบว่ามีค่า auctionStart และ auctionEnd หรือไม่
+        if (!auctionStart || !auctionEnd) {
+          setAuctionStatus('ended');
+          return 'ไม่มีข้อมูลเวลา';
+        }
         
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        // ตรวจสอบว่าเป็น string หรือไม่
+        if (typeof auctionStart !== 'string' || typeof auctionEnd !== 'string') {
+          setAuctionStatus('ended');
+          return 'รูปแบบเวลาไม่ถูกต้อง';
+        }
+        
+        // ✅ ใช้ dayjs แบบง่ายๆ โดยไม่ต้อง setDefault
+        // ดึงเวลาปัจจุบัน (browser time)
+        const now = dayjs();
+        
+        // Parse เวลาจาก API (ซึ่งเป็น UTC ISO string อยู่แล้ว)
+        const startTime = dayjs(auctionStart);
+        const endTime = dayjs(auctionEnd);
+        
+        // ตรวจสอบว่าเป็นเวลาที่ถูกต้องหรือไม่
+        if (!startTime.isValid() || !endTime.isValid()) {
+          console.error('Invalid date:', { auctionStart, auctionEnd });
+          setAuctionStatus('ended');
+          return 'ข้อมูลเวลาไม่ถูกต้อง';
+        }
+      
+      // ตรวจสอบสถานะประมูล
+      if (now.isBefore(startTime)) {
+        // ยังไม่เปิดประมูล
+        setAuctionStatus('waiting');
+        const diffSeconds = startTime.diff(now, 'second');
+        
+        if (diffSeconds <= 0) {
+          return 'เปิดแล้ว';
+        }
+        
+        const hours = Math.floor(diffSeconds / 3600);
+        const minutes = Math.floor((diffSeconds % 3600) / 60);
+        const seconds = diffSeconds % 60;
+        
+        if (hours >= 24) {
+          const days = Math.floor(hours / 24);
+          const remainingHours = hours % 24;
+          return `เปิด ${days}วัน ${remainingHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        } else if (hours > 0) {
+          return `เปิด ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        } else {
+          return `เปิด ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+      } else if (now.isAfter(startTime) && now.isBefore(endTime)) {
+        // กำลังประมูล
+        setAuctionStatus('active');
+        const diffSeconds = endTime.diff(now, 'second');
+        
+        if (diffSeconds <= 0) {
+          return 'สิ้นสุดแล้ว';
+        }
+        
+        const hours = Math.floor(diffSeconds / 3600);
+        const minutes = Math.floor((diffSeconds % 3600) / 60);
+        const seconds = diffSeconds % 60;
+        
+        // ✅ ตรวจสอบว่าปิดในวันนี้หรือใกล้ปิด (< 24 ชั่วโมง)
+        if (hours < 24) {
+          setIsClosingSoon(true);  // สีแดง
+        } else {
+          setIsClosingSoon(false); // สีฟ้า
+        }
+        
+        if (hours >= 24) {
+          const days = Math.floor(hours / 24);
+          const remainingHours = hours % 24;
+          return `${days}วัน ${remainingHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        } else if (hours > 0) {
+          return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        } else {
+          return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+      } else {
+        // สิ้นสุดแล้ว
+        setAuctionStatus('ended');
+        return 'สิ้นสุดแล้ว';
       }
-      return 'สิ้นสุดแล้ว';
+      } catch (error) {
+        // จัดการ error ที่เกิดขึ้นทั้งหมด
+        console.error('CountdownTimer Error:', error, {
+          auctionStart,
+          auctionEnd
+        });
+        setAuctionStatus('ended');
+        return 'เกิดข้อผิดพลาด';
+      }
     };
 
     setTimeLeft(calculateTimeLeft());
@@ -32,108 +126,454 @@ const CountdownTimer = ({ endTime }) => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [endTime]);
+  }, [endTime, auctionStart, auctionEnd]);
+
+  const getStatusColor = () => {
+    switch (auctionStatus) {
+      case 'waiting':
+        return 'text-blue-600 bg-blue-50';
+      case 'active':
+        // ✅ ถ้าปิดในวันนี้หรือใกล้ปิด (< 24 ชม.) → สีแดง, ถ้าไม่ → สีฟ้า
+        return isClosingSoon ? 'text-red-600 bg-red-50' : 'text-blue-600 bg-blue-50';
+      case 'ended':
+        return 'text-gray-600 bg-gray-50';
+      default:
+        return 'text-red-600 bg-red-50';
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (auctionStatus) {
+      case 'waiting':
+        return <Clock className="w-2 h-2" />;
+      case 'active':
+        return <Gavel className="w-2 h-2" />;
+      case 'ended':
+        return <Clock className="w-2 h-2" />;
+      default:
+        return <Clock className="w-2 h-2" />;
+    }
+  };
 
   return (
-    <div className="flex items-center space-x-1 text-red-600 bg-red-50 px-2 py-1 rounded-lg">
-      <Clock className="w-3 h-3" />
-      <span className="text-xs font-semibold">{timeLeft}</span>
+    <div className={`flex items-center space-x-0.5 px-1 py-0.5 rounded-sm ${getStatusColor()}`}>
+      {getStatusIcon()}
+      <span className="text-[8px] font-semibold">{timeLeft}</span>
     </div>
   );
 };
 
-const ProductCard = ({ product, isHorizontalScroll = false }) => {
-  const handleActionClick = (feature) => {
-    toast({
-      title: `🚧 ${feature} ยังไม่เปิดใช้งาน`,
-      description: "ฟีเจอร์นี้ยังไม่พร้อมใช้งาน แต่คุณสามารถขอให้สร้างได้ในพรอมต์ถัดไป! 🚀",
-    });
+const ProductCard = ({ product, isHorizontalScroll = false, favoriteIds = [], userBidIds = [] }) => {
+  const { isAuthenticated, user } = useAuth();
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [hasUserBid, setHasUserBid] = useState(false);
+
+  useEffect(() => {
+    // Check if product is in favorites list (from parent component)
+    setIsFavorite(favoriteIds.includes(product.id));
+    
+    // Check if user has bid on this product
+    setHasUserBid(userBidIds.includes(product.id));
+  }, [favoriteIds, product.id, userBidIds]);
+
+  const handleFavoriteClick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!isAuthenticated()) {
+      toast({
+        title: "กรุณาเข้าสู่ระบบ",
+        description: "คุณต้องเข้าสู่ระบบก่อนใช้งานรายการโปรด",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      if (isFavorite) {
+        // Remove from favorites
+        await apiService.favorites.remove(product.id);
+        setIsFavorite(false);
+        toast({
+          title: "ลบออกจากรายการโปรด",
+          description: "ลบสินค้าออกจากรายการโปรดแล้ว"
+        });
+      } else {
+        // Add to favorites
+        await apiService.favorites.add(product.id);
+        setIsFavorite(true);
+        toast({
+          title: "เพิ่มในรายการโปรด",
+          description: "เพิ่มสินค้าในรายการโปรดแล้ว"
+        });
+      }
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      console.error('Error details:', {
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      });
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: error.response?.data?.message || error.message || "ไม่สามารถอัปเดตรายการโปรดได้",
+        variant: "destructive"
+      });
+    }
   };
 
+  // Check if product is sold or ended
+  const isSold = product.status === 'sold';
+  const isEnded = product.status === 'active' && product.auction_end && new Date(product.auction_end) <= new Date();
+  const isInactive = isSold || isEnded;
+
   return (
-    <div className={`flex-shrink-0 bg-white rounded-lg overflow-hidden shadow-sm border border-gray-200/80 hover:shadow-md transition-shadow ${isHorizontalScroll ? 'w-36' : 'w-full'}`}>
-      <div className="relative">
+    <Link 
+      to={`/product/${product.id}`}
+      className={`flex-shrink-0 bg-white overflow-hidden rounded-lg shadow hover:shadow-md transition-all duration-300 ${isHorizontalScroll ? 'w-24' : 'w-full'} block group ${isInactive ? 'opacity-60 grayscale' : ''}`}
+    >
+      <div className="relative aspect-square overflow-hidden">
         <img
           alt={product.name}
-          className="h-32 w-full object-cover"
-         src="https://images.unsplash.com/photo-1559223669-e0065fa7f142" />
+          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+          src={(() => {
+            if (product.image_url) return product.image_url;
+            if (product.primary_image) return product.primary_image;
+            if (product.images) {
+              try {
+                const parsed = typeof product.images === 'string' ? JSON.parse(product.images) : product.images;
+                if (Array.isArray(parsed) && parsed[0]) return parsed[0];
+              } catch (e) {
+                console.error('Error parsing images:', e);
+              }
+            }
+            return 'https://placehold.co/300x300/e5e7eb/9ca3af?text=No+Image';
+          })()}
+          onError={(e) => {
+            e.target.src = 'https://placehold.co/300x300/e5e7eb/9ca3af?text=No+Image';
+          }}
+        />
+        {/* User's Bid Badge - Only show if user has bid on this product */}
+        {isAuthenticated() && hasUserBid && product.status === 'active' && product.auction_end && new Date(product.auction_end) > new Date() && (
+          <div className="absolute top-1 left-1 bg-gradient-to-r from-red-500 to-red-600 text-white px-1.5 py-0.5 rounded-full text-[7px] font-bold flex items-center space-x-0.5 z-10">
+            <Gavel className="w-2 h-2" />
+            <span>คุณประมูล</span>
+          </div>
+        )}
+        
+        {/* Ended Auction Badge */}
+        {isEnded && (
+          <div className="absolute top-1 left-1 bg-gray-600 text-white px-1.5 py-0.5 rounded-full text-[7px] font-bold flex items-center space-x-0.5 z-10">
+            <Clock className="w-2 h-2" />
+            <span>สิ้นสุดแล้ว</span>
+          </div>
+        )}
+        
+        {/* Sold Badge */}
+        {isSold && (
+          <div className="absolute top-1 left-1 bg-green-600 text-white px-1.5 py-0.5 rounded-full text-[7px] font-bold flex items-center space-x-0.5 z-10">
+            <span>ขายแล้ว</span>
+          </div>
+        )}
+        
         <button 
-          onClick={() => handleActionClick('ถูกใจ')}
-          className="absolute top-2 right-2 bg-black/30 text-white p-1.5 rounded-full backdrop-blur-sm hover:bg-black/50 transition-colors"
+          onClick={handleFavoriteClick}
+          className="absolute top-1 right-1 bg-white/80 text-gray-600 p-1 rounded-full backdrop-blur-sm hover:bg-white hover:text-red-500 transition-all duration-300 z-10 hover:scale-110"
         >
-          <Heart className="w-4 h-4" />
+          <Heart className={`w-3 h-3 ${isFavorite ? 'fill-red-500 text-red-500' : ''}`} />
         </button>
       </div>
-      <div className="p-3">
-        <p className="text-gray-700 text-sm truncate font-medium">{product.name}</p>
-        <p className="font-bold text-lg mt-1 text-gray-900">฿{product.price.toLocaleString()}</p>
-        {product.endTime && (
-          <div className="mt-2">
-            <CountdownTimer endTime={product.endTime} />
+      <div className="p-2 bg-white">
+        <p className="text-gray-700 text-[9px] truncate font-medium leading-tight">{product.name}</p>
+        
+        {/* Price and Auction Status */}
+        <div className="mt-0.5">
+          {product.status === 'active' && product.auction_start && product.auction_end ? (
+            (() => {
+              const now = new Date();
+              const startTime = new Date(product.auction_start);
+              const endTime = new Date(product.auction_end);
+              
+              if (now < startTime) {
+                // ยังไม่เปิดประมูล
+                return (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-[10px] text-gray-900">
+                        ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                      </p>
+                      <p className="text-[8px] text-gray-500">ราคาเริ่มต้น</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] text-blue-600 font-semibold">รอเปิดประมูล</p>
+                      <p className="text-[7px] text-gray-500">เริ่ม {startTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</p>
+                    </div>
+                  </div>
+                );
+              } else if (now >= startTime && now < endTime) {
+                // กำลังประมูล
+                return (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-[10px] text-gray-900">
+                        ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                      </p>
+                      <p className="text-[8px] text-gray-500">ราคาปัจจุบัน</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] text-orange-600 font-semibold">ประมูล</p>
+                      <p className="text-[7px] text-gray-500">+{product.bid_count || 0} ครั้ง</p>
+                    </div>
+                  </div>
+                );
+              } else {
+                // สิ้นสุดแล้ว
+                return (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-bold text-[10px] text-gray-600">
+                        ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                      </p>
+                      <p className="text-[8px] text-gray-500">ราคาสุดท้าย</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] text-gray-600 font-semibold">สิ้นสุดแล้ว</p>
+                      <p className="text-[7px] text-gray-500">{product.bid_count || 0} ครั้ง</p>
+                    </div>
+                  </div>
+                );
+              }
+            })()
+          ) : product.status === 'active' && product.auction_end && new Date(product.auction_end) > new Date() ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-[10px] text-gray-900">
+                  ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                </p>
+                <p className="text-[8px] text-gray-500">ราคาปัจจุบัน</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[8px] text-orange-600 font-semibold">ประมูล</p>
+                <p className="text-[7px] text-gray-500">+{product.bid_count || 0} ครั้ง</p>
+              </div>
+            </div>
+          ) : isSold ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-[10px] text-green-600">
+                  ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                </p>
+                <p className="text-[8px] text-green-500">ราคาขาย</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[8px] text-green-600 font-semibold">ขายแล้ว</p>
+                <p className="text-[7px] text-gray-500">{product.bid_count || 0} ครั้ง</p>
+              </div>
+            </div>
+          ) : isEnded ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-bold text-[10px] text-gray-600">
+                  ฿{parseFloat(product.current_price || product.starting_price || 0).toLocaleString()}
+                </p>
+                <p className="text-[8px] text-gray-500">ราคาสุดท้าย</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[8px] text-gray-600 font-semibold">สิ้นสุด</p>
+                <p className="text-[7px] text-gray-500">{product.bid_count || 0} ครั้ง</p>
+              </div>
+            </div>
+          ) : (
+            <p className="font-bold text-[10px] text-gray-900">
+              ฿{parseFloat(product.current_price || product.starting_price || product.price || 0).toLocaleString()}
+            </p>
+          )}
+        </div>
+        
+        {product.auction_end && !isInactive && (
+          <div className="mt-0.5">
+            <CountdownTimer 
+              endTime={product.auction_end} 
+              auctionStart={product.auction_start}
+              auctionEnd={product.auction_end}
+            />
+          </div>
+        )}
+        
+        {/* Show final status for sold/ended items */}
+        {isInactive && (
+          <div className="mt-0.5">
+            {isSold ? (
+              <div className="flex items-center space-x-0.5 text-green-600 bg-green-50 px-1 py-0.5 rounded-sm">
+                <span className="text-[8px] font-semibold">ขายแล้ว</span>
+              </div>
+            ) : isEnded ? (
+              <div className="flex items-center space-x-0.5 text-gray-600 bg-gray-50 px-1 py-0.5 rounded-sm">
+                <Clock className="w-2 h-2" />
+                <span className="text-[8px] font-semibold">สิ้นสุดแล้ว</span>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
-    </div>
+    </Link>
   );
 };
 
 const Home = () => {
     const [viewHistory, setViewHistory] = useState([]);
-    const [recommended, setRecommended] = useState([]);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [userName, setUserName] = useState('');
-    const [showUserMenu, setShowUserMenu] = useState(false);
-    const [activeTab, setActiveTab] = useState(0);
+    const [viewHistoryLoading, setViewHistoryLoading] = useState(false);
+    const [displayedProducts, setDisplayedProducts] = useState([]);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [favoriteIds, setFavoriteIds] = useState([]);
+    const [userBidIds, setUserBidIds] = useState([]);
+    const [hiddenProductIds, setHiddenProductIds] = useState(new Set()); // สินค้าที่ต้องซ่อน
+    const { products, loading, error, fetchProducts } = useProducts();
+    const { isAuthenticated } = useAuth();
 
+    // Initialize displayed products
     useEffect(() => {
-        // Check if user is logged in
-        const userAuth = localStorage.getItem('userAuth');
-        const storedUserName = localStorage.getItem('userName');
-        if (userAuth === 'true') {
-            setIsLoggedIn(true);
-            setUserName(storedUserName || 'User');
+        if (products.length > 0) {
+            setDisplayedProducts(products);
         }
-        
-        // Generate end times for countdown
-        const now = new Date();
-        const getRandomEndTime = (hoursToAdd) => {
-            const endTime = new Date(now.getTime() + hoursToAdd * 60 * 60 * 1000);
-            return endTime.toISOString();
-        };
-        
-        // Mock data with countdown timers
-        setViewHistory([
-            { id: 1, name: 'ชุดฟิกเกอร์ของเล่น', price: 8519, endTime: getRandomEndTime(2) },
-            { id: 2, name: 'กล่องของสะสม Minecraft', price: 1, endTime: getRandomEndTime(5) },
-            { id: 3, name: 'ของเล่น Toy Story', price: 11561, endTime: getRandomEndTime(1) },
-            { id: 4, name: 'การ์ดเกมส์หายาก', price: 8110, endTime: getRandomEndTime(3) },
-            { id: 5, name: 'โมเดลประกอบ', price: 2500, endTime: getRandomEndTime(6) },
-        ]);
-        setRecommended([
-            { id: 101, name: 'ฟิกเกอร์ Stormtrooper และอุปกรณ์', price: 100, endTime: getRandomEndTime(4) },
-            { id: 102, name: 'ชุดใหญ่ Star Wars Micro Machines', price: 7750, endTime: getRandomEndTime(8) },
-            { id: 103, name: 'รวมฟิกเกอร์ STAR WARS', price: 3000, endTime: getRandomEndTime(2.5) },
-            { id: 104, name: 'หุ่น R2-D2', price: 1200, endTime: getRandomEndTime(7) },
-            { id: 105, name: 'โมเดล Predator', price: 4500, endTime: getRandomEndTime(1.5) },
-            { id: 106, name: 'ฟิกเกอร์ Iron Man Mark V', price: 6800, endTime: getRandomEndTime(3.5) },
-            { id: 107, name: 'ฟิกเกอร์ Spider-Man', price: 5200, endTime: getRandomEndTime(5) },
-            { id: 108, name: 'โมเดล Batman', price: 4800, endTime: getRandomEndTime(2) },
-            { id: 109, name: 'ของสะสม Transformers', price: 9500, endTime: getRandomEndTime(6) },
-            { id: 110, name: 'ชุด Lego Star Wars', price: 12000, endTime: getRandomEndTime(4) },
-        ]);
-    }, []);
+    }, [products]);
 
-    // Close dropdown when clicking outside
+    // Load more products
+    const loadMoreProducts = async () => {
+        if (loadingMore || !hasMore) return;
+        
+        try {
+            setLoadingMore(true);
+            const nextPage = currentPage + 1;
+            const response = await apiService.products.getAll({ page: nextPage, limit: 20 });
+            const newProducts = response.data.data;
+            
+            if (newProducts.length === 0) {
+                setHasMore(false);
+            } else {
+                setDisplayedProducts(prev => [...prev, ...newProducts]);
+                setCurrentPage(nextPage);
+                setHasMore(response.data.pagination?.hasNextPage || false);
+            }
+        } catch (error) {
+            console.error('Error loading more products:', error);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
+
+    // Infinite scroll handler
+    const handleScroll = useCallback(() => {
+        if (loadingMore || !hasMore) return;
+        
+        const scrollTop = document.documentElement.scrollTop;
+        const scrollHeight = document.documentElement.scrollHeight;
+        const clientHeight = document.documentElement.clientHeight;
+        
+        // Load more when user is 200px from bottom
+        if (scrollTop + clientHeight >= scrollHeight - 200) {
+            loadMoreProducts();
+        }
+    }, [loadingMore, hasMore, loadMoreProducts]);
+
+    // Add scroll listener
     useEffect(() => {
-        const handleClickOutside = (event) => {
-            if (showUserMenu && !event.target.closest('.relative')) {
-                setShowUserMenu(false);
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, [handleScroll]);
+
+    // ✅ Auto-hide sold/ended products after 2-3 minutes
+    useEffect(() => {
+        const checkAndHideInactiveProducts = () => {
+            const now = new Date();
+            const newHiddenIds = new Set(hiddenProductIds);
+            
+            displayedProducts.forEach(product => {
+                const isSold = product.status === 'sold';
+                const isEnded = product.status === 'active' && product.auction_end && new Date(product.auction_end) <= now;
+                
+                if (isSold || isEnded) {
+                    // ตรวจสอบว่าสินค้านี้ขายไปหรือสิ้นสุดเมื่อไหร่
+                    const endTime = new Date(product.auction_end || product.updated_at);
+                    const timeSinceEnd = now - endTime;
+                    
+                    // ถ้าผ่านไป 2-3 นาที (120-180 วินาที) ให้ซ่อน
+                    const hideAfterMs = 150000; // 2.5 นาที (150 วินาที)
+                    
+                    if (timeSinceEnd >= hideAfterMs) {
+                        newHiddenIds.add(product.id);
+                    }
+                }
+            });
+            
+            if (newHiddenIds.size !== hiddenProductIds.size) {
+                setHiddenProductIds(newHiddenIds);
             }
         };
         
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, [showUserMenu]);
+        // เช็คทุก 30 วินาที
+        const interval = setInterval(checkAndHideInactiveProducts, 30000);
+        checkAndHideInactiveProducts(); // เช็คทันทีตอนโหลดหน้า
+        
+        return () => clearInterval(interval);
+    }, [displayedProducts, hiddenProductIds]);
+
+    // Load favorites and user bids once
+    useEffect(() => {
+        const fetchFavorites = async () => {
+            if (isAuthenticated()) {
+                try {
+                    const response = await apiService.favorites.getAll();
+                    const favorites = response.data.data || [];
+                    setFavoriteIds(favorites.map(fav => fav.product_id));
+                } catch (error) {
+                    console.error('Error fetching favorites:', error);
+                }
+            }
+        };
+        
+        const fetchUserBids = async () => {
+            if (isAuthenticated()) {
+                try {
+                    const response = await apiService.bids.getUserBids();
+                    const bids = response.data.data || [];
+                    setUserBidIds(bids.map(bid => bid.product_id));
+                } catch (error) {
+                    console.error('Error fetching user bids:', error);
+                }
+            }
+        };
+        
+        fetchFavorites();
+        fetchUserBids();
+    }, [isAuthenticated]);
+
+    useEffect(() => {
+        const fetchViewHistory = async () => {
+            if (isAuthenticated()) {
+                try {
+                    setViewHistoryLoading(true);
+                    const response = await apiService.products.getViewHistory();
+                    setViewHistory(response.data.data || []);
+                } catch (error) {
+                    console.error('Error fetching view history:', error);
+                    // Fallback to recent products if API fails
+                    setViewHistory(displayedProducts.slice(0, 5));
+                } finally {
+                    setViewHistoryLoading(false);
+                }
+            } else {
+                // For non-authenticated users, show recent products
+                setViewHistory(displayedProducts.slice(0, 5));
+            }
+        };
+
+        if (displayedProducts.length > 0) {
+            fetchViewHistory();
+        }
+    }, [displayedProducts, isAuthenticated]);
 
     const handleActionClick = (feature) => {
       toast({
@@ -142,142 +582,25 @@ const Home = () => {
       });
     };
 
-    const handleLogout = () => {
-      localStorage.removeItem('userAuth');
-      localStorage.removeItem('userName');
-      setIsLoggedIn(false);
-      setUserName('');
-      setShowUserMenu(false);
-      toast({
-        title: "ออกจากระบบสำเร็จ",
-        description: "แล้วพบกันใหม่! 👋",
-      });
-    };
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <span className="ml-2 text-gray-600">กำลังโหลดสินค้า...</span>
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="text-center py-12">
+          <p className="text-red-500 mb-4">เกิดข้อผิดพลาด: {error}</p>
+        </div>
+      );
+    }
 
     return (
         <div className="bg-gray-100 min-h-screen font-sans pb-24 md:pb-0">
-            {/* Desktop Header */}
-            <header className="hidden md:block sticky top-0 z-40 w-full bg-gradient-to-r from-black via-gray-900 to-black backdrop-blur-xl border-b border-gray-800/50 shadow-lg">
-              <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex items-center justify-between h-20">
-                  {/* Logo & Nav */}
-                  <div className="flex items-center space-x-12">
-                    <Link to="/" className="flex items-center group">
-                      <div className="relative">
-                        <div className="absolute inset-0 bg-white/20 rounded-xl blur-md opacity-30 group-hover:opacity-50 transition-opacity"></div>
-                        <img src={pamoonLogo} alt="PAMOON" className="relative h-14 w-14 object-contain transform group-hover:scale-110 transition-transform" />
-                      </div>
-                    </Link>
-                    <nav className="hidden lg:flex items-center space-x-1">
-                      <Link to="/" className="relative px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors group">
-                        <span className="relative z-10">สินค้าทั้งหมด</span>
-                        <span className="absolute inset-0 bg-white/10 rounded-lg scale-0 group-hover:scale-100 transition-transform"></span>
-                      </Link>
-                      <Link to="/" className="relative px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors group">
-                        <span className="relative z-10">วิธีการประมูล</span>
-                        <span className="absolute inset-0 bg-white/10 rounded-lg scale-0 group-hover:scale-100 transition-transform"></span>
-                      </Link>
-                      <Link to="/" className="relative px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition-colors group">
-                        <span className="relative z-10">ติดต่อเรา</span>
-                        <span className="absolute inset-0 bg-white/10 rounded-lg scale-0 group-hover:scale-100 transition-transform"></span>
-                      </Link>
-                    </nav>
-                  </div>
-                  
-                  {/* Search & Actions */}
-                  <div className="flex items-center space-x-4">
-                    {/* Search Bar */}
-                    <div className="relative hidden lg:block">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                      <input 
-                        type="text" 
-                        placeholder="ค้นหาสินค้า..." 
-                        className="w-64 bg-white/10 border border-white/10 text-white placeholder-gray-400 rounded-full pl-10 pr-4 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:bg-white/20 transition-all"
-                      />
-                    </div>
-                    
-                    {/* Action Buttons */}
-                    <button className="relative p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-full transition-all">
-                      <Search className="h-5 w-5 lg:hidden" />
-                    </button>
-                    <button className="relative p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-full transition-all group">
-                      <ShoppingBag className="h-5 w-5" />
-                      <span className="absolute -top-1 -right-1 bg-white text-black text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full scale-0 group-hover:scale-100 transition-transform">3</span>
-                    </button>
-                    <button className="relative p-2 text-gray-300 hover:text-white hover:bg-white/10 rounded-full transition-all group">
-                      <Bell className="h-5 w-5" />
-                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full">9</span>
-                    </button>
-                    
-                    {/* User Menu */}
-                    {isLoggedIn ? (
-                      <div className="relative">
-                        <button 
-                          onClick={() => setShowUserMenu(!showUserMenu)}
-                          className="flex items-center space-x-2 text-sm font-medium text-black bg-white rounded-full pl-2 pr-4 py-2 hover:bg-gray-200 hover:shadow-lg hover:scale-105 transition-all"
-                        >
-                          <div className="w-8 h-8 bg-black text-white rounded-full flex items-center justify-center font-bold">
-                            {userName.charAt(0).toUpperCase()}
-                          </div>
-                          <span>{userName}</span>
-                        </button>
-                        
-                        {showUserMenu && (
-                          <div className="absolute right-0 mt-3 w-56 bg-gray-900 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 overflow-hidden z-50">
-                            <div className="bg-white px-4 py-4 text-black">
-                              <p className="text-sm font-bold">{userName}</p>
-                              <p className="text-xs opacity-70">สมาชิก PAMOON</p>
-                            </div>
-                            <div className="py-2">
-                              <Link 
-                                to="/profile"
-                                className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-300 hover:bg-white/10 transition-colors"
-                                onClick={() => setShowUserMenu(false)}
-                              >
-                                <User className="h-4 w-4 text-white" />
-                                <span>โปรไฟล์</span>
-                              </Link>
-                              <Link 
-                                to="/orders"
-                                className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-300 hover:bg-white/10 transition-colors"
-                                onClick={() => setShowUserMenu(false)}
-                              >
-                                <Package className="h-4 w-4 text-white" />
-                                <span>คำสั่งซื้อ</span>
-                              </Link>
-                              <Link 
-                                to="/favorites"
-                                className="flex items-center space-x-3 px-4 py-3 text-sm text-gray-300 hover:bg-white/10 transition-colors"
-                                onClick={() => setShowUserMenu(false)}
-                              >
-                                <Heart className="h-4 w-4 text-white" />
-                                <span>รายการโปรด</span>
-                              </Link>
-                              <hr className="my-2 border-gray-700" />
-                              <button 
-                                onClick={handleLogout}
-                                className="flex items-center space-x-3 px-4 py-3 text-sm text-red-400 hover:bg-red-950/30 transition-colors w-full text-left"
-                              >
-                                <LogOut className="h-4 w-4" />
-                                <span>ออกจากระบบ</span>
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <Link to="/login" className="relative group">
-                        <div className="px-6 py-2 bg-white text-black rounded-full hover:bg-gray-200 transition-all shadow-md">
-                          <span className="text-sm font-semibold">
-                      เข้าสู่ระบบ
-                          </span>
-                        </div>
-                    </Link>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </header>
             
             <div className="hidden md:block relative z-10 max-w-7xl mx-auto pt-16 pb-0 px-4 sm:px-6 lg:px-8">
                  <div className="relative rounded-3xl overflow-hidden p-12 mb-6 bg-black" style={{ height: '350px' }}>
@@ -346,10 +669,9 @@ const Home = () => {
                       >
                         <Link
                           to="/"
-                          className="group relative inline-flex items-center justify-center px-8 py-3 text-base font-semibold text-white bg-gradient-to-r from-purple-600 to-pink-600 rounded-full overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
+                          className="group relative inline-flex items-center justify-center px-8 py-3 text-base font-semibold text-black bg-white rounded-full overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 hover:bg-gray-100"
                         >
                           <span className="relative z-10">วิธีการประมูล</span>
-                          <div className="absolute inset-0 bg-gradient-to-r from-purple-700 to-pink-700 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                         </Link>
                         <Link
                           to="/"
@@ -362,118 +684,54 @@ const Home = () => {
                 </div>
             </div>
 
-            {/* Categories Slider - Desktop */}
-            <div className="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-0 pb-8">
-                <div className="flex items-center justify-between mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">หมวดหมู่สินค้า</h2>
-                    <Link to="/" className="text-purple-600 hover:text-purple-700 font-medium text-sm">
-                        ดูทั้งหมด →
-                    </Link>
-                </div>
-                <div className="relative">
-                    <div className="flex overflow-x-auto gap-6 pb-4 hide-scrollbar snap-x snap-mandatory scroll-smooth">
-                        {[
-                            { id: 1, name: 'ของเล่น', icon: Baby, color: 'from-purple-400 to-purple-600' },
-                            { id: 2, name: 'ฟิกเกอร์', icon: Users, color: 'from-purple-500 to-purple-700' },
-                            { id: 3, name: 'การ์ดเกม', icon: CreditCard, color: 'from-violet-400 to-violet-600' },
-                            { id: 4, name: 'โมเดล', icon: Plane, color: 'from-violet-500 to-violet-700' },
-                            { id: 5, name: 'ของสะสม', icon: Gem, color: 'from-fuchsia-400 to-fuchsia-600' },
-                            { id: 6, name: 'หนังสือ', icon: BookOpen, color: 'from-fuchsia-500 to-fuchsia-700' },
-                            { id: 7, name: 'เครื่องเล่น', icon: Gamepad2, color: 'from-pink-400 to-pink-600' },
-                            { id: 8, name: 'อื่นๆ', icon: Gift, color: 'from-pink-500 to-pink-700' },
-                        ].map((category) => {
-                            const IconComponent = category.icon;
-                            return (
-                                <Link
-                                    key={category.id}
-                                    to="/"
-                                    className="group flex-shrink-0 snap-start"
-                                >
-                                    <div className="flex flex-col items-center space-y-3 w-32">
-                                        <div className={`w-24 h-24 bg-gradient-to-br ${category.color} rounded-2xl flex items-center justify-center transform transition-all duration-300 group-hover:scale-110 group-hover:shadow-xl`}>
-                                            <IconComponent className="w-10 h-10 text-white" strokeWidth={1.5} />
-                                        </div>
-                                        <span className="text-sm font-medium text-gray-900 text-center group-hover:text-purple-600 transition-colors">
-                                            {category.name}
-                                        </span>
-                                    </div>
-                                </Link>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-
-            {/* Categories Slider - Mobile */}
-            <div className="md:hidden px-3 pt-4 pb-6 bg-white">
-                <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-bold text-gray-900">หมวดหมู่</h2>
-                    <Link to="/" className="text-purple-600 font-medium text-xs">
-                        ทั้งหมด →
-                    </Link>
-                </div>
-                <div className="flex overflow-x-auto gap-4 pb-2 hide-scrollbar snap-x snap-mandatory scroll-smooth">
-                    {[
-                        { id: 1, name: 'ของเล่น', icon: Baby, color: 'from-purple-400 to-purple-600' },
-                        { id: 2, name: 'ฟิกเกอร์', icon: Users, color: 'from-purple-500 to-purple-700' },
-                        { id: 3, name: 'การ์ดเกม', icon: CreditCard, color: 'from-violet-400 to-violet-600' },
-                        { id: 4, name: 'โมเดล', icon: Plane, color: 'from-violet-500 to-violet-700' },
-                        { id: 5, name: 'ของสะสม', icon: Gem, color: 'from-fuchsia-400 to-fuchsia-600' },
-                        { id: 6, name: 'หนังสือ', icon: BookOpen, color: 'from-fuchsia-500 to-fuchsia-700' },
-                        { id: 7, name: 'เครื่องเล่น', icon: Gamepad2, color: 'from-pink-400 to-pink-600' },
-                        { id: 8, name: 'อื่นๆ', icon: Gift, color: 'from-pink-500 to-pink-700' },
-                    ].map((category) => {
-                        const IconComponent = category.icon;
-                        return (
-                            <Link
-                                key={category.id}
-                                to="/"
-                                className="flex-shrink-0 snap-start"
-                            >
-                                <div className="flex flex-col items-center space-y-2 w-20">
-                                    <div className={`w-16 h-16 bg-gradient-to-br ${category.color} rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-transform`}>
-                                        <IconComponent className="w-8 h-8 text-white" strokeWidth={1.5} />
-                                    </div>
-                                    <span className="text-xs font-medium text-gray-900 text-center">
-                                        {category.name}
-                                    </span>
-                                </div>
-                            </Link>
-                        );
-                    })}
-                </div>
-            </div>
-
             <main className="p-3 md:p-0">
-                <div className="md:hidden bg-green-200 text-green-800 p-4 rounded-lg flex items-center justify-between mb-4">
-                    <div className="flex items-center">
-                        <span className="text-3xl font-bold mr-2">1,000 บาท</span>
-                        <span className="font-semibold">เทียบเท่า</span>
+                {/* Viewing History - Horizontal Scroll - Extra Small */}
+                <section className="mb-3 md:hidden">
+                    <div className="flex justify-between items-center mb-1">
+                        <h2 className="font-medium text-[10px] text-gray-500">ประวัติการเข้าชม</h2>
+                        <button onClick={() => handleActionClick('สินค้าเพิ่มเติม')} className="text-blue-400 text-[9px] font-normal">สินค้าเพิ่มเติม &gt;</button>
                     </div>
-                    <p className="text-xs text-right">※เงื่อนไขการใช้งานและขีดจำกัดอาจแตกต่างกันไป</p>
-                </div>
-                
-                {/* Viewing History - Horizontal Scroll */}
-                <section className="mb-6 md:hidden">
-                    <div className="flex justify-between items-center mb-2">
-                        <h2 className="font-bold text-sm">ประวัติการเข้าชม</h2>
-                        <button onClick={() => handleActionClick('ดูเพิ่มเติม')} className="text-blue-600 text-xs font-semibold">ดูเพิ่มเติม &gt;</button>
-                    </div>
-                    <div className="flex space-x-3 overflow-x-auto pb-2 -mx-3 px-3 hide-scrollbar">
-                        {viewHistory.map(product => (
-                            <ProductCard key={product.id} product={product} isHorizontalScroll={true} />
-                        ))}
-                    </div>
+                    {viewHistoryLoading ? (
+                        <div className="flex space-x-1.5 overflow-x-auto pb-0.5 -mx-3 px-3">
+                            {[1, 2, 3].map(i => (
+                                <div key={i} className="w-24 h-24 bg-gray-200 animate-pulse rounded"></div>
+                            ))}
+                        </div>
+                    ) : viewHistory.length > 0 ? (
+                        <div className="flex space-x-1.5 overflow-x-auto pb-0.5 -mx-3 px-3 hide-scrollbar">
+                            {viewHistory
+                                .filter(product => !hiddenProductIds.has(product.id))
+                                .slice(0, 3)
+                                .map(product => (
+                                    <ProductCard key={product.id} product={product} isHorizontalScroll={true} favoriteIds={favoriteIds} userBidIds={userBidIds} />
+                                ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-4">
+                            <p className="text-gray-400 text-[9px]">ยังไม่มีประวัติการเข้าชม</p>
+                        </div>
+                    )}
                 </section>
 
                 {/* Recommended For You - Grid */}
                 <section className="md:hidden">
                     <h2 className="font-bold text-sm mb-2">สินค้าแนะนำสำหรับคุณ</h2>
                     <div className="grid grid-cols-3 gap-3">
-                        {recommended.map(product => (
-                            <ProductCard key={product.id} product={product} />
-                        ))}
+                        {displayedProducts
+                            .filter(product => !hiddenProductIds.has(product.id))
+                            .map(product => (
+                                <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
+                            ))}
                     </div>
+                    {/* Loading indicator for infinite scroll */}
+                    {loadingMore && (
+                        <div className="mt-4 text-center">
+                            <div className="inline-flex items-center space-x-2 text-gray-500">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+                                <span className="text-sm">กำลังโหลดสินค้าเพิ่มเติม...</span>
+                            </div>
+                        </div>
+                    )}
                 </section>
                  {/* Original Desktop Product Grid */}
                 <div className="hidden md:block max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-16">
@@ -482,210 +740,26 @@ const Home = () => {
                         <p className="text-gray-600 text-sm mt-1">ร่วมประมูลสินค้าคุณภาพในราคาพิเศษ</p>
                     </div>
                     <div className="grid grid-cols-5 gap-4">
-                        {[...viewHistory, ...recommended].slice(0, 10).map((product) => (
-                            <ProductCard key={product.id} product={product} />
-                        ))}
+                        {displayedProducts
+                            .filter(product => !hiddenProductIds.has(product.id))
+                            .map((product) => (
+                                <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
+                            ))}
                     </div>
+                    {/* Load More Button - Desktop */}
+                    {/* Loading indicator for infinite scroll */}
+                    {loadingMore && (
+                        <div className="mt-8 text-center">
+                            <div className="inline-flex items-center space-x-2 text-gray-500">
+                                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-gray-500"></div>
+                                <span className="text-lg">กำลังโหลดสินค้าเพิ่มเติม...</span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </main>
 
-            {/* Popular Products Section - Desktop */}
-            <div className="hidden md:block bg-white py-16">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex items-center justify-between mb-8">
-                        <h2 className="text-3xl font-bold text-gray-900">สินค้ายอดนิยมในปัจจุบัน</h2>
-                        <p className="text-sm text-gray-500">ปรับปรุงล่าสุด 20/10 20:00 น.</p>
-                    </div>
-                    
-                    {/* Tab Navigation */}
-                    <div className="flex space-x-2 mb-6 border-b border-gray-200">
-                        {[
-                            { title: "รถจิ๋ว", icon: Car },
-                            { title: "บัตรเข้าชมสวนสนุกและสวนสนุกอิ่มปาร์ค", icon: Ticket },
-                            { title: "เฟอร์นิเจอร์ในรถ", icon: Armchair },
-                            { title: "อีซีฮุยอนเทล", icon: Cpu }
-                        ].map((tab, idx) => {
-                            const IconComponent = tab.icon;
-                            return (
-                                <button
-                                    key={idx}
-                                    onClick={() => setActiveTab(idx)}
-                                    className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium whitespace-nowrap transition-all ${
-                                        activeTab === idx
-                                            ? 'text-blue-600 border-b-2 border-blue-600'
-                                            : 'text-gray-600 hover:text-gray-900'
-                                    }`}
-                                >
-                                    <IconComponent className="w-4 h-4" />
-                                    <span>{tab.title}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
 
-                    {/* Tab Content */}
-                    <div className="grid grid-cols-3 gap-6">
-                        {(() => {
-                            const categories = [
-                                {
-                                    products: [
-                                        { rank: 1, name: "ไมเดสทราอนิต้า Nismo Nissan Skyline BNR3...", price: "3,100" },
-                                        { rank: 2, name: "exoto 1/18 Tyrrell P3 4 Ronnie Peterson", price: "1,000" },
-                                        { rank: 3, name: "80. รถโมเดล Nissan Skyline 2000 GT-R สี...", price: "2,800" }
-                                    ]
-                                },
-                                {
-                                    products: [
-                                        { rank: 1, name: "ทดมปตร์ 1 วันสำหรับผู้ใต้ อกูน Oriental Land T...", price: "9,550" },
-                                        { rank: 2, name: "งานกิเดทร์ [ตำเรียดเดดบียบ สมอรี้ไม่รับการแนบ...", price: "25,000" },
-                                        { rank: 3, name: "[JAL-sponsored Private Night] ปีครุสำหรับ...", price: "25,000" }
-                                    ]
-                                },
-                                {
-                                    products: [
-                                        { rank: 1, name: "โต๊ะเสีย Karin ไม่มือแช่งสายใใม่บริส สายอม ทาง...", price: "1,000" },
-                                        { rank: 2, name: "★ผู้ทันตศึกญิ้งเดดซือยน Shows ปาง...", price: "1,000" },
-                                        { rank: 3, name: "○ขายเลึกใ○073 [อันตตี้ยอมรักบการรถบั่นค่าโตยต...", price: "1,000" }
-                                    ]
-                                },
-                                {
-                                    products: [
-                                        { rank: 1, name: "ชิพัย Intel Core i5-950 3.00Ghz", price: "4,210" },
-                                        { rank: 2, name: "Intel Core i7-9700 Tray Edition รุ่น 9 / LG...", price: "11" },
-                                        { rank: 3, name: "รุ่นต่อสากกับ: T-09310 / Intel / CPU / Core...", price: "5,500" }
-                                    ]
-                                }
-                            ];
-                            
-                            const currentProducts = categories[activeTab].products;
-                            
-                            return currentProducts.map((product) => (
-                                <div key={product.rank} className="flex items-start space-x-3 group cursor-pointer">
-                                    <div className={`flex-shrink-0 w-10 h-10 rounded flex items-center justify-center font-bold text-lg ${
-                                        product.rank === 1 ? 'bg-yellow-400 text-white' :
-                                        product.rank === 2 ? 'bg-gray-300 text-gray-700' :
-                                        'bg-orange-400 text-white'
-                                    }`}>
-                                        {product.rank}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="bg-gray-50 rounded-lg p-4 group-hover:shadow-md transition-shadow border border-gray-200">
-                                            <div className="w-full h-32 bg-gray-200 rounded-lg mb-3 overflow-hidden">
-                                                <img 
-                                                    src="https://images.unsplash.com/photo-1559223669-e0065fa7f142" 
-                                                    alt={product.name}
-                                                    className="w-full h-full object-cover"
-                                                />
-                                            </div>
-                                            <p className="text-sm text-gray-700 line-clamp-2 mb-2 min-h-[40px]">
-                                                {product.name}
-                                            </p>
-                                            <p className="text-xs text-gray-500 mb-2">กระแปียฉุบิน</p>
-                                            <p className="text-red-600 font-bold text-lg">
-                                                {product.price} <span className="text-sm">เชน</span>
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ));
-                        })()}
-                    </div>
-                </div>
-            </div>
-
-            {/* Popular Products Section - Mobile */}
-            <div className="md:hidden bg-white py-8">
-                <div className="px-4">
-                    <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-xl font-bold text-gray-900">สินค้ายอดนิยม</h2>
-                        <p className="text-xs text-gray-500">20/10 20:00</p>
-                    </div>
-                    
-                    {/* Tab Navigation Mobile */}
-                    <div className="flex overflow-x-auto space-x-2 mb-6 pb-2 hide-scrollbar">
-                        {[
-                            { title: "รถจิ๋ว", icon: Car },
-                            { title: "บัตรสวนสนุก", icon: Ticket },
-                            { title: "เฟอร์นิเจอร์", icon: Armchair },
-                            { title: "อีซีฮุย", icon: Cpu }
-                        ].map((tab, idx) => {
-                            const IconComponent = tab.icon;
-                            return (
-                                <button
-                                    key={idx}
-                                    onClick={() => setActiveTab(idx)}
-                                    className={`flex items-center space-x-1.5 px-4 py-2 text-xs font-medium whitespace-nowrap rounded-full transition-all ${
-                                        activeTab === idx
-                                            ? 'bg-blue-600 text-white'
-                                            : 'bg-gray-100 text-gray-600'
-                                    }`}
-                                >
-                                    <IconComponent className="w-3.5 h-3.5" />
-                                    <span>{tab.title}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                    
-                    {/* Tab Content */}
-                    <div className="space-y-3">
-                        {(() => {
-                            const categories = [
-                                [
-                                    { rank: 1, name: "ไมเดสทราอนิต้า Nismo Nissan Skyline BNR3...", price: "3,100" },
-                                    { rank: 2, name: "exoto 1/18 Tyrrell P3 4 Ronnie Peterson", price: "1,000" },
-                                    { rank: 3, name: "80. รถโมเดล Nissan Skyline 2000 GT-R", price: "2,800" }
-                                ],
-                                [
-                                    { rank: 1, name: "ทดมปตร์ 1 วันสำหรับผู้ใต้", price: "9,550" },
-                                    { rank: 2, name: "งานกิเดทร์ [ตำเรียดเดดบียบ", price: "25,000" },
-                                    { rank: 3, name: "[JAL-sponsored Private Night]", price: "25,000" }
-                                ],
-                                [
-                                    { rank: 1, name: "โต๊ะเสีย Karin ไม่มือแช่ง", price: "1,000" },
-                                    { rank: 2, name: "★ผู้ทันตศึกญิ้งเดด Shows", price: "1,000" },
-                                    { rank: 3, name: "○ขายเลึกใ○073 [อันตตี้", price: "1,000" }
-                                ],
-                                [
-                                    { rank: 1, name: "ชิพัย Intel Core i5-950 3.00Ghz", price: "4,210" },
-                                    { rank: 2, name: "Intel Core i7-9700 Tray Edition", price: "11" },
-                                    { rank: 3, name: "รุ่นต่อสากกับ: T-09310", price: "5,500" }
-                                ]
-                            ];
-                            
-                            return categories[activeTab].map((product) => (
-                                <div key={product.rank} className="flex items-start space-x-2">
-                                    <div className={`flex-shrink-0 w-7 h-7 rounded flex items-center justify-center font-bold text-xs ${
-                                        product.rank === 1 ? 'bg-yellow-400 text-white' :
-                                        product.rank === 2 ? 'bg-gray-300 text-gray-700' :
-                                        'bg-orange-400 text-white'
-                                    }`}>
-                                        {product.rank}
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="bg-gray-50 rounded-lg p-2 border border-gray-200">
-                                            <div className="w-full h-16 bg-gray-200 rounded-lg mb-2 overflow-hidden">
-                                                <img 
-                                                    src="https://images.unsplash.com/photo-1559223669-e0065fa7f142" 
-                                                    alt={product.name}
-                                                    className="w-full h-full object-cover"
-                                                />
-                                            </div>
-                                            <p className="text-xs text-gray-700 line-clamp-2 mb-1">
-                                                {product.name}
-                                            </p>
-                                            <p className="text-[10px] text-gray-500 mb-1">กระแปียฉุบิน</p>
-                                            <p className="text-red-600 font-bold text-xs">
-                                                {product.price} <span className="text-[10px]">เชน</span>
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ));
-                        })()}
-                    </div>
-                </div>
-            </div>
 
             {/* Reviews Section - Desktop */}
             <div className="hidden md:block bg-white py-20">
@@ -785,67 +859,67 @@ const Home = () => {
             </div>
 
             {/* Reviews Section - Mobile */}
-            <div className="md:hidden bg-white py-12">
+            <div className="md:hidden bg-gradient-to-b from-gray-50 to-white py-10">
                 <div className="px-4">
-                    <div className="text-center mb-8">
-                        <h2 className="text-2xl font-bold text-gray-900 mb-2">เสียงจากผู้ใช้งาน</h2>
-                        <p className="text-gray-600 text-sm">ประสบการณ์ที่ประทับใจ</p>
+                    <div className="text-center mb-6">
+                        <h2 className="text-xl font-bold text-gray-900 mb-1">เสียงจากผู้ใช้งาน</h2>
+                        <p className="text-gray-600 text-xs">ประสบการณ์ที่ประทับใจ</p>
                     </div>
                     
-                    <div className="flex overflow-x-auto gap-4 pb-4 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
+                    <div className="flex overflow-x-auto gap-3 pb-4 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
                         {[
                             {
                                 id: 1,
-                                text: "ประทับใจระบบการประมูลมาก ใช้งานง่าย รวดเร็ว และได้สินค้าที่ต้องการในราคาที่ดี ประมูลได้ฟิกเกอร์หายากที่หามานาน",
+                                text: "ประทับใจระบบการประมูล ใช้งานง่ายมาก ได้สินค้าในราคาที่ดี",
                                 avatar: "https://randomuser.me/api/portraits/men/32.jpg",
                                 name: "สมชาย วงศ์ทอง",
                                 role: "นักสะสมฟิกเกอร์"
                             },
                             {
                                 id: 2,
-                                text: "PAMOON เป็นแพลตฟอร์มที่ดีที่สุดสำหรับนักสะสม มีของหายาก ของสะสมเยอะมาก ระบบการประมูลโปร่งใส เชื่อถือได้",
+                                text: "PAMOON เป็นแพลตฟอร์มที่ดี มีของหายาก ระบบโปร่งใส เชื่อถือได้",
                                 avatar: "https://randomuser.me/api/portraits/women/44.jpg",
                                 name: "วิภาวี ใจดี",
                                 role: "นักสะสมของเล่น"
                             },
                             {
                                 id: 3,
-                                text: "ใช้งานง่าย ไม่ซับซ้อน การประมูลเป็นไปอย่างยุติธรรม ทีมงานดูแลดีมาก ตอบคำถามเร็ว",
+                                text: "ใช้งานง่าย การประมูลยุติธรรม ทีมงานดูแลดี ตอบคำถามเร็ว",
                                 avatar: "https://randomuser.me/api/portraits/men/75.jpg",
                                 name: "ธนพล สุขสันต์",
                                 role: "นักสะสมการ์ดเกม"
                             },
                             {
                                 id: 4,
-                                text: "ได้สินค้าที่ชอบในราคาที่คุ้มค่า ระบบการประมูลทำงานได้ดีมาก การจัดส่งรวดเร็ว",
+                                text: "ได้สินค้าที่ชอบในราคาคุ้มค่า ระบบทำงานดี การจัดส่งรวดเร็ว",
                                 avatar: "https://randomuser.me/api/portraits/women/68.jpg",
                                 name: "นภัสสร ศรีสุข",
                                 role: "นักสะสมโมเดล"
                             },
                             {
                                 id: 5,
-                                text: "เว็บไซต์ใช้งานง่าย ค้นหาสินค้าสะดวก มีหมวดหมู่ให้เลือกเยอะ ประมูลได้สินค้าที่ต้องการหลายชิ้น",
+                                text: "เว็บไซต์ใช้งานง่าย ค้นหาสะดวก มีหมวดหมู่ให้เลือกเยอะ",
                                 avatar: "https://randomuser.me/api/portraits/men/46.jpg",
                                 name: "ประเสริฐ มั่นคง",
                                 role: "นักสะสมหนังสือ"
                             },
                             {
                                 id: 6,
-                                text: "บริการดีเยี่ยม ระบบการประมูลมีความยุติธรรม ได้ของสะสมหายากที่หามานาน ขอบคุณ PAMOON มากครับ",
+                                text: "บริการดีเยี่ยม ระบบยุติธรรม ได้ของสะสมหายาก ขอบคุณมากครับ",
                                 avatar: "https://randomuser.me/api/portraits/women/29.jpg",
                                 name: "สุภาพร แก้วใส",
                                 role: "นักสะสมของโบราณ"
                             },
                             {
                                 id: 7,
-                                text: "ราคาดี คุณภาพดี ประมูลได้สินค้าในราคาที่ต่ำกว่าตลาด แต่ได้ของแท้ มีใบรับรอง",
+                                text: "ราคาดี คุณภาพดี ประมูลได้ของแท้ในราคาที่ต่ำกว่าตลาด",
                                 avatar: "https://randomuser.me/api/portraits/men/52.jpg",
                                 name: "วิชัย ทองคำ",
                                 role: "นักสะสมของวินเทจ"
                             },
                             {
                                 id: 8,
-                                text: "ประมูลครั้งแรกกับ PAMOON ได้สินค้าที่ต้องการเลย ระบบแจ้งเตือนทำงานดี บริการหลังการขายดีมาก",
+                                text: "ประมูลครั้งแรกได้สินค้าเลย ระบบแจ้งเตือนดี บริการดีมาก",
                                 avatar: "https://randomuser.me/api/portraits/women/65.jpg",
                                 name: "กนกวรรณ สว่างใจ",
                                 role: "นักสะสมเครื่องเล่น"
@@ -853,21 +927,21 @@ const Home = () => {
                         ].map((review) => (
                             <div
                                 key={review.id}
-                                className="flex-shrink-0 w-72 snap-start bg-gray-50 backdrop-blur-xl border border-gray-200 rounded-2xl p-5 shadow-sm"
+                                className="flex-shrink-0 w-[280px] snap-start bg-white border border-gray-200 rounded-xl p-4 shadow-sm"
                             >
-                                <div className="flex flex-col h-full">
-                                    <p className="text-gray-700 text-sm leading-relaxed mb-4 flex-grow">
+                                <div className="flex flex-col">
+                                    <p className="text-gray-700 text-xs leading-relaxed mb-3 line-clamp-3">
                                         "{review.text}"
                                     </p>
-                                    <div className="flex items-center space-x-3">
+                                    <div className="flex items-center space-x-2 pt-3 border-t border-gray-100">
                                         <img 
                                             src={review.avatar} 
                                             alt={review.name}
-                                            className="w-10 h-10 rounded-full border-2 border-gray-200"
+                                            className="w-9 h-9 rounded-full border-2 border-gray-200"
                                         />
-                                        <div>
-                                            <p className="text-gray-900 font-semibold text-xs">{review.name}</p>
-                                            <p className="text-gray-500 text-[10px]">{review.role}</p>
+                                        <div className="flex-1 min-w-0">
+                                            <p className="text-gray-900 font-semibold text-xs truncate">{review.name}</p>
+                                            <p className="text-gray-500 text-[10px] truncate">{review.role}</p>
                                         </div>
                                     </div>
                                 </div>

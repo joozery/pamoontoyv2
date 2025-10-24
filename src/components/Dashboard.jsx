@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Package, Users, ShoppingCart, Star, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, MoreVertical, Eye } from 'lucide-react';
+import { Package, Users, ShoppingCart, Star, TrendingUp, DollarSign, ArrowUpRight, ArrowDownRight, MoreVertical, Eye, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -18,98 +18,168 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { apiService } from '@/services/api';
+import { toast } from '@/components/ui/use-toast';
+import { useNavigate } from 'react-router-dom';
 
 const Dashboard = () => {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalProducts: 142,
-    totalUsers: 1234,
-    totalOrders: 856,
-    totalReviews: 324,
-    revenue: 2458900,
-    pendingOrders: 23
+    totalProducts: 0,
+    activeProducts: 0,
+    totalUsers: 0,
+    totalOrders: 0,
+    pendingOrders: 0,
+    completedOrders: 0,
+    totalRevenue: 0,
+    totalBids: 0,
+    recentUsers: 0,
   });
+  const [recentOrders, setRecentOrders] = useState([]);
+  const [topProducts, setTopProducts] = useState([]);
 
-  // Mock data for recent activities
-  const recentOrders = [
-    { id: 'ORD-001', customer: 'สมชาย ใจดี', product: 'ฟิกเกอร์ Iron Man', amount: 6800, status: 'completed', date: '2024-10-21' },
-    { id: 'ORD-002', customer: 'สมหญิง รักดี', product: 'โมเดล Batman', amount: 4800, status: 'pending', date: '2024-10-21' },
-    { id: 'ORD-003', customer: 'วิชัย มีสุข', product: 'การ์ดโปเกมอน', amount: 25000, status: 'processing', date: '2024-10-20' },
-    { id: 'ORD-004', customer: 'นภา สวยงาม', product: 'Lego Star Wars', amount: 12000, status: 'completed', date: '2024-10-20' },
-    { id: 'ORD-005', customer: 'ประสิทธิ์ ดีมาก', product: 'ของสะสม Transformers', amount: 9500, status: 'completed', date: '2024-10-19' },
-  ];
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
 
-  const topProducts = [
-    { name: 'ฟิกเกอร์ Iron Man Mark V', sales: 145, revenue: 986000 },
-    { name: 'โมเดล Batman Limited', sales: 123, revenue: 590400 },
-    { name: 'การ์ดโปเกมอน Charizard', sales: 98, revenue: 2450000 },
-    { name: 'Lego Star Wars', sales: 87, revenue: 1044000 },
-  ];
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      
+      // Load dashboard stats
+      const statsResponse = await apiService.dashboard.getStats();
+      if (statsResponse.data.success) {
+        setStats(statsResponse.data.data);
+      }
+
+      // Load latest orders (limit 5)
+      const ordersResponse = await apiService.dashboard.getLatestOrders({ limit: 5 });
+      if (ordersResponse.data.success) {
+        setRecentOrders(ordersResponse.data.data || []);
+      }
+
+      // Load top products
+      const topProductsResponse = await apiService.dashboard.getTopProducts({ limit: 4 });
+      if (topProductsResponse.data.success) {
+        setTopProducts(topProductsResponse.data.data || []);
+      }
+
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถโหลดข้อมูลแดชบอร์ดได้",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const statCards = [
     { 
       title: 'รายได้รวม', 
-      value: `฿${stats.revenue.toLocaleString()}`, 
+      value: loading ? '...' : `฿${(stats.totalRevenue || 0).toLocaleString()}`, 
       change: '+12.5%',
       isPositive: true,
       icon: DollarSign, 
       color: 'text-green-600',
       bgColor: 'bg-green-50',
-      description: 'เทียบกับเดือนที่แล้ว'
+      description: 'จากคำสั่งซื้อที่สำเร็จ'
     },
     { 
       title: 'ผู้ใช้งานทั้งหมด', 
-      value: stats.totalUsers.toLocaleString(), 
-      change: '+8.2%',
+      value: loading ? '...' : (stats.totalUsers || 0).toLocaleString(), 
+      change: stats.recentUsers > 0 ? `+${stats.recentUsers}` : '+0',
       isPositive: true,
       icon: Users, 
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
-      description: 'ผู้ใช้งานใหม่ 92 คน'
+      description: 'ผู้ใช้ใหม่ 7 วันล่าสุด'
     },
     { 
       title: 'คำสั่งซื้อ', 
-      value: stats.totalOrders.toLocaleString(), 
-      change: '-3.1%',
-      isPositive: false,
+      value: loading ? '...' : (stats.totalOrders || 0).toLocaleString(), 
+      change: stats.pendingOrders > 0 ? `${stats.pendingOrders} รอดำเนินการ` : 'ไม่มีรอดำเนินการ',
+      isPositive: stats.pendingOrders === 0,
       icon: ShoppingCart, 
       color: 'text-purple-600',
       bgColor: 'bg-purple-50',
-      description: `รอดำเนินการ ${stats.pendingOrders} รายการ`
+      description: `สำเร็จ ${stats.completedOrders || 0} รายการ`
     },
     { 
       title: 'สินค้าทั้งหมด', 
-      value: stats.totalProducts.toLocaleString(), 
-      change: '+5.4%',
+      value: loading ? '...' : (stats.totalProducts || 0).toLocaleString(), 
+      change: `${stats.activeProducts || 0} กำลังประมูล`,
       isPositive: true,
       icon: Package, 
       color: 'text-orange-600',
       bgColor: 'bg-orange-50',
-      description: 'สินค้าใหม่ 18 รายการ'
+      description: `การเสนอราคา ${stats.totalBids || 0} รายการ`
     },
   ];
 
   const getStatusBadge = (status) => {
-    const variants = {
-      completed: 'default',
-      pending: 'secondary',
-      processing: 'outline'
-    };
-    
-    const labels = {
-      completed: 'สำเร็จ',
-      pending: 'รอชำระเงิน',
-      processing: 'กำลังดำเนินการ'
+    const statusMap = {
+      pending: { variant: 'secondary', label: 'รอชำระเงิน', color: 'bg-yellow-100 text-yellow-800' },
+      paid: { variant: 'default', label: 'ชำระแล้ว', color: 'bg-blue-100 text-blue-800' },
+      confirmed: { variant: 'default', label: 'ยืนยันแล้ว', color: 'bg-green-100 text-green-800' },
+      shipped: { variant: 'default', label: 'จัดส่งแล้ว', color: 'bg-indigo-100 text-indigo-800' },
+      delivered: { variant: 'default', label: 'ส่งถึงแล้ว', color: 'bg-green-100 text-green-800' },
+      completed: { variant: 'default', label: 'สำเร็จ', color: 'bg-green-100 text-green-800' },
+      cancelled: { variant: 'destructive', label: 'ยกเลิก', color: 'bg-red-100 text-red-800' },
     };
 
+    const statusInfo = statusMap[status] || { variant: 'secondary', label: status, color: 'bg-gray-100 text-gray-800' };
+
     return (
-      <Badge variant={variants[status]} className="text-xs">
-        {labels[status]}
+      <Badge className={`text-xs ${statusInfo.color} border-0`}>
+        {statusInfo.label}
       </Badge>
     );
   };
 
+  const formatDate = (dateString) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('th-TH', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+        <span className="ml-3 text-gray-600">กำลังโหลดข้อมูล...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Header with Refresh */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">แดชบอร์ด</h1>
+          <p className="text-muted-foreground">ภาพรวมระบบและสถิติสำคัญ</p>
+        </div>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={loadDashboardData}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          รีเฟรช
+        </Button>
+      </div>
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map((stat, index) => {
@@ -135,7 +205,7 @@ const Dashboard = () => {
                 <CardContent>
                   <div className="text-2xl font-bold text-gray-900">{stat.value}</div>
                   <div className="flex items-center text-xs mt-1">
-                    <span className={`flex items-center ${stat.isPositive ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className={`flex items-center ${stat.isPositive ? 'text-green-600' : 'text-yellow-600'}`}>
                       <ChangeIcon className="h-3 w-3 mr-0.5" />
                       {stat.change}
                     </span>
@@ -163,52 +233,55 @@ const Dashboard = () => {
                   <CardTitle>คำสั่งซื้อล่าสุด</CardTitle>
                   <CardDescription>รายการคำสั่งซื้อที่เพิ่งเกิดขึ้น</CardDescription>
                 </div>
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => navigate('/admin/payments')}
+                >
                   ดูทั้งหมด
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>รหัสคำสั่งซื้อ</TableHead>
-                    <TableHead>ลูกค้า</TableHead>
-                    <TableHead>สินค้า</TableHead>
-                    <TableHead>ยอดเงิน</TableHead>
-                    <TableHead>สถานะ</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {recentOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="font-medium">{order.id}</TableCell>
-                      <TableCell>{order.customer}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{order.product}</TableCell>
-                      <TableCell>฿{order.amount.toLocaleString()}</TableCell>
-                      <TableCell>{getStatusBadge(order.status)}</TableCell>
-                      <TableCell>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
-                              <Eye className="mr-2 h-4 w-4" />
-                              ดูรายละเอียด
-                            </DropdownMenuItem>
-                            <DropdownMenuItem>แก้ไข</DropdownMenuItem>
-                            <DropdownMenuItem className="text-red-600">ลบ</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
+              {recentOrders.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <ShoppingCart className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>ยังไม่มีคำสั่งซื้อ</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>รหัส</TableHead>
+                      <TableHead>ลูกค้า</TableHead>
+                      <TableHead>สินค้า</TableHead>
+                      <TableHead>ยอดเงิน</TableHead>
+                      <TableHead>สถานะ</TableHead>
+                      <TableHead>วันที่</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {recentOrders.map((order) => (
+                      <TableRow key={order.id}>
+                        <TableCell className="font-mono text-xs">#{order.id}</TableCell>
+                        <TableCell className="max-w-[120px] truncate">
+                          {order.customer_name || order.user_name || '-'}
+                        </TableCell>
+                        <TableCell className="max-w-[200px] truncate">
+                          {order.product_name || '-'}
+                        </TableCell>
+                        <TableCell className="font-semibold">
+                          ฿{(order.total_amount || 0).toLocaleString()}
+                        </TableCell>
+                        <TableCell>{getStatusBadge(order.status)}</TableCell>
+                        <TableCell className="text-xs text-gray-500">
+                          {formatDate(order.created_at)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -222,33 +295,40 @@ const Dashboard = () => {
           <Card>
             <CardHeader>
               <CardTitle>สินค้ายอดนิยม</CardTitle>
-              <CardDescription>สินค้าที่ขายดีที่สุด</CardDescription>
+              <CardDescription>สินค้าที่มีการเสนอราคามากที่สุด</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
-                {topProducts.map((product, index) => (
-                  <div key={product.name} className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-900 font-semibold text-sm">
-                        {index + 1}
+              {topProducts.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>ยังไม่มีข้อมูล</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {topProducts.map((product, index) => (
+                    <div key={product.id} className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-900 font-semibold text-sm">
+                          {index + 1}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-gray-900 leading-none mb-1">
+                            {product.name || product.product_name}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {product.bid_count || 0} การเสนอราคา
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900 leading-none mb-1">
-                          {product.name}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          {product.sales} รายการ
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-900">
+                          ฿{((product.current_price || 0) / 1000).toFixed(0)}k
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-semibold text-gray-900">
-                        ฿{(product.revenue / 1000).toFixed(0)}k
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -260,19 +340,16 @@ const Dashboard = () => {
             <CardContent>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">รีวิวทั้งหมด</span>
-                  <span className="text-sm font-semibold text-gray-900">{stats.totalReviews}</span>
+                  <span className="text-sm text-gray-600">การเสนอราคาทั้งหมด</span>
+                  <span className="text-sm font-semibold text-gray-900">{stats.totalBids || 0}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">คะแนนเฉลี่ย</span>
-                  <div className="flex items-center gap-1">
-                    <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                    <span className="text-sm font-semibold text-gray-900">4.8</span>
-                  </div>
+                  <span className="text-sm text-gray-600">สินค้าที่กำลังประมูล</span>
+                  <span className="text-sm font-semibold text-green-600">{stats.activeProducts || 0}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">อัตราการเติบโต</span>
-                  <span className="text-sm font-semibold text-green-600">+24.3%</span>
+                  <span className="text-sm text-gray-600">คำสั่งซื้อรอดำเนินการ</span>
+                  <span className="text-sm font-semibold text-orange-600">{stats.pendingOrders || 0}</span>
                 </div>
               </div>
             </CardContent>

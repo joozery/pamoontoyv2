@@ -1,23 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Bell, ShoppingBag, User, LogOut, Package, Heart, Menu, X } from 'lucide-react';
+import { Search, ShoppingBag, User, LogOut, Package, Heart, Menu, X, Gavel } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import pamoonLogo from '@/assets/pamoontoy.png';
+import { useAuth } from '@/contexts/AuthContext';
 
 const MobileHeader = () => {
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [userName, setUserName] = useState('');
+    const { user, isAuthenticated, logout } = useAuth();
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [notificationCount, setNotificationCount] = useState(9);
     const menuRef = useRef(null);
     const navigate = useNavigate();
-
-    useEffect(() => {
-        const storedUserName = localStorage.getItem('userName');
-        setIsLoggedIn(!!storedUserName);
-        setUserName(storedUserName || '');
-    }, []);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -33,9 +27,7 @@ const MobileHeader = () => {
     }, [showUserMenu]);
 
     const handleLogout = () => {
-        localStorage.removeItem('userName');
-        setIsLoggedIn(false);
-        setUserName('');
+        logout();
         setShowUserMenu(false);
         navigate('/');
     };
@@ -48,12 +40,12 @@ const MobileHeader = () => {
     };
 
     return (
-        <header className="sticky top-0 bg-white border-b border-gray-200 shadow-sm z-50 md:hidden">
-            {/* Main Header Bar */}
-            <div className="px-4 py-3">
-                <div className="flex items-center justify-between mb-3">
+        <header className="sticky top-0 bg-gradient-to-br from-gray-900 via-black to-gray-800 border-b border-gray-800 shadow-lg z-50 md:hidden">
+            {/* Main Header Bar - All in one row */}
+            <div className="px-3 py-2.5">
+                <div className="flex items-center space-x-2">
                     {/* Logo */}
-                    <Link to="/" className="flex items-center">
+                    <Link to="/" className="flex-shrink-0">
                         <motion.div
                             whileTap={{ scale: 0.95 }}
                             className="relative"
@@ -61,47 +53,54 @@ const MobileHeader = () => {
                             <img 
                                 src={pamoonLogo} 
                                 alt="PAMOON" 
-                                className="h-10 w-10 object-contain" 
+                                className="h-8 w-8 object-contain" 
                             />
                         </motion.div>
                     </Link>
                     
+                    {/* Search Bar - Now inline with logo */}
+                    <form onSubmit={handleSearch} className="flex-1 relative min-w-0">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                        <input 
+                            type="text" 
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="ค้นหาสินค้า..." 
+                            className="w-full bg-gray-800 border border-gray-700 text-white placeholder-gray-400 rounded-lg pl-8 pr-3 py-2 text-xs focus:ring-2 focus:ring-white focus:border-transparent transition-all" 
+                        />
+                    </form>
+                    
                     {/* Action Buttons */}
-                    <div className="flex items-center space-x-2">
-                        {/* Notification */}
-                        <motion.button 
-                            whileTap={{ scale: 0.9 }}
-                            className="relative p-2 text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
-                        >
-                            <Bell className="w-5 h-5" />
-                            {notificationCount > 0 && (
-                                <motion.span
-                                    initial={{ scale: 0 }}
-                                    animate={{ scale: 1 }}
-                                    className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full px-1"
-                                >
-                                    {notificationCount > 9 ? '9+' : notificationCount}
-                                </motion.span>
-                            )}
-                        </motion.button>
-
+                    <div className="flex items-center space-x-0.5">
                         {/* Shopping Bag */}
-                        <motion.button 
-                            whileTap={{ scale: 0.9 }}
-                            className="relative p-2 text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
-                        >
-                            <ShoppingBag className="w-5 h-5" />
-                        </motion.button>
+                        <Link to="/orders">
+                            <motion.button 
+                                whileTap={{ scale: 0.9 }}
+                                className="relative p-1.5 text-white hover:bg-gray-800 rounded-full transition-colors"
+                            >
+                                <ShoppingBag className="w-4 h-4" />
+                            </motion.button>
+                        </Link>
+
+                        {/* My Bids */}
+                        <Link to="/my-bids" title="รายการที่กำลังประมูล">
+                            <motion.button 
+                                whileTap={{ scale: 0.9 }}
+                                className="relative p-1.5 text-white hover:bg-gray-800 rounded-full transition-colors"
+                            >
+                                <Gavel className="w-4 h-4" />
+                            </motion.button>
+                        </Link>
                         
                         {/* User Menu */}
-                        {isLoggedIn ? (
+                        {isAuthenticated() ? (
                             <div className="relative" ref={menuRef}>
                                 <motion.button 
                                     whileTap={{ scale: 0.9 }}
                                     onClick={() => setShowUserMenu(!showUserMenu)}
-                                    className="flex items-center justify-center w-9 h-9 bg-gray-900 text-white rounded-full font-bold text-sm shadow-md hover:bg-black transition-colors"
+                                    className="flex items-center justify-center w-7 h-7 bg-white text-black rounded-full font-bold text-xs shadow-md hover:bg-gray-100 transition-colors"
                                 >
-                                    {userName.charAt(0).toUpperCase()}
+                                    {user?.name?.charAt(0).toUpperCase() || 'U'}
                                 </motion.button>
 
                                 {/* User Dropdown */}
@@ -118,10 +117,10 @@ const MobileHeader = () => {
                                             <div className="bg-gradient-to-br from-gray-900 to-gray-800 px-4 py-4 text-white">
                                                 <div className="flex items-center space-x-3">
                                                     <div className="w-12 h-12 bg-white text-gray-900 rounded-full flex items-center justify-center font-bold text-lg">
-                                                        {userName.charAt(0).toUpperCase()}
+                                                        {user?.name?.charAt(0).toUpperCase() || 'U'}
                                                     </div>
                                                     <div className="flex-1 min-w-0">
-                                                        <p className="font-semibold text-sm truncate">{userName}</p>
+                                                        <p className="font-semibold text-sm truncate">{user?.name || 'User'}</p>
                                                         <p className="text-xs text-gray-300">สมาชิก PAMOON</p>
                                                     </div>
                                                 </div>
@@ -172,63 +171,51 @@ const MobileHeader = () => {
                         ) : (
                             <Link
                                 to="/login"
-                                className="px-4 py-2 bg-gray-900 text-white text-xs font-semibold rounded-full shadow-md hover:bg-black transition-colors"
+                                className="px-2 py-1 bg-white text-black text-xs font-semibold rounded-full shadow-md hover:bg-gray-100 transition-colors"
                             >
                                 เข้าสู่ระบบ
                             </Link>
                         )}
                     </div>
                 </div>
-                
-                {/* Search Bar */}
-                <form onSubmit={handleSearch} className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input 
-                        type="text" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="ค้นหาสินค้า, หมวดหมู่, หรือแบรนด์..." 
-                        className="w-full bg-gray-50 border border-gray-200 text-gray-900 placeholder-gray-500 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all" 
-                    />
-                </form>
             </div>
 
             {/* Category Tabs */}
-            <div className="bg-white border-t border-gray-100">
-                <div className="flex overflow-x-auto scrollbar-hide px-4 space-x-4 py-3">
+            <div className="bg-black border-t border-gray-800">
+                <div className="flex overflow-x-auto scrollbar-hide px-3 space-x-3 py-2.5">
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-900 bg-gray-900 text-white rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-white text-black rounded-full transition-colors"
                     >
                         ทั้งหมด
                     </Link>
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 rounded-full transition-colors"
                     >
                         ของเล่น
                     </Link>
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 rounded-full transition-colors"
                     >
                         ฟิกเกอร์
                     </Link>
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 rounded-full transition-colors"
                     >
                         โมเดล
                     </Link>
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 rounded-full transition-colors"
                     >
                         การ์ด
                     </Link>
                     <Link 
                         to="/"
-                        className="flex-shrink-0 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+                        className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 rounded-full transition-colors"
                     >
                         อื่นๆ
                     </Link>

@@ -53,7 +53,7 @@ const Search = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-white pt-6 pb-24 px-4">
+        <div className="min-h-screen bg-white pt-6 pb-24 px-4">
             <div className="max-w-2xl mx-auto">
                 {/* Search Header */}
                 <motion.div
@@ -208,10 +208,10 @@ const Search = () => {
                             >
                                 <div className="flex items-center space-x-3">
                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs ${
-                                        index === 0 ? 'bg-yellow-400 text-gray-900' :
-                                        index === 1 ? 'bg-gray-300 text-gray-900' :
-                                        index === 2 ? 'bg-orange-400 text-white' :
-                                        'bg-gray-100 text-gray-600'
+                                        index === 0 ? 'bg-black text-white' :
+                                        index === 1 ? 'bg-gray-700 text-white' :
+                                        index === 2 ? 'bg-gray-500 text-white' :
+                                        'bg-gray-200 text-gray-700'
                                     }`}>
                                         {index + 1}
                                     </div>

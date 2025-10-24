@@ -5,35 +5,68 @@ import { Eye, EyeOff, Lock, User, ArrowLeft } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { Helmet } from 'react-helmet';
 import pamoonLogo from '@/assets/pamoontoy.png';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
-  const [username, setUsername] = useState('');
+  const { login } = useAuth();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    
+    if (!email || !password) {
+      toast({
+        title: "กรุณากรอกข้อมูลให้ครบ",
+        description: "โปรดระบุอีเมลและรหัสผ่าน",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsLoading(true);
 
-    setTimeout(() => {
-      if (username === 'admin' && password === 'admin') {
-        localStorage.setItem('adminAuth', 'true');
-        toast({
-          title: "เข้าสู่ระบบสำเร็จ",
-          description: "ยินดีต้อนรับสู่ระบบจัดการ",
-        });
-        navigate('/admin');
+    try {
+      const result = await login({ email, password });
+      
+      if (result.success) {
+        // Check if user is admin
+        if (result.data.user.role === 'admin') {
+          localStorage.setItem('adminAuth', 'true');
+          toast({
+            title: "เข้าสู่ระบบสำเร็จ",
+            description: `ยินดีต้อนรับ ${result.data.user.name || result.data.user.email}`,
+          });
+          navigate('/admin');
+        } else {
+          // Not an admin
+          localStorage.removeItem('token');
+          localStorage.removeItem('adminAuth');
+          toast({
+            title: "เข้าสู่ระบบไม่สำเร็จ",
+            description: "คุณไม่มีสิทธิ์เข้าถึงหน้านี้",
+            variant: "destructive",
+          });
+        }
       } else {
         toast({
           title: "เข้าสู่ระบบไม่สำเร็จ",
-          description: "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+          description: result.message || "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
           variant: "destructive",
         });
       }
+    } catch (error) {
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์",
+        variant: "destructive",
+      });
+    } finally {
       setIsLoading(false);
-    }, 800);
+    }
   };
 
   return (
@@ -89,18 +122,18 @@ const Login = () => {
             {/* Form */}
             <div className="px-6 py-6">
               <form onSubmit={handleLogin} className="space-y-4">
-                {/* Username */}
+                {/* Email */}
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1.5">
-                    ชื่อผู้ใช้
+                    อีเมล
                   </label>
                   <div className="relative">
                     <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
-                      type="text"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="admin@pamoon.com"
                       className="w-full pl-9 pr-3 py-2.5 bg-white border border-gray-300 text-gray-900 text-sm placeholder-gray-400 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all"
                       required
                     />

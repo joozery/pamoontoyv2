@@ -43,3 +43,38 @@ Thumbs.db
 dist-ssr
 *.local
 
+
+# Environment and Config
+*.env
+config.env
+production.env
+
+# Vite cache
+node_modules/.vite/
+
+# Server specific
+*.service
+deploy*.sh
+start-*.sh
+setup-*.sh
+
+# Documentation (temporary)
+*_README.md
+*_GUIDE.md
+*_DEPLOYMENT.md
+*_SUMMARY.md
+*_ISSUE.md
+*_STATUS.md
+*_SETUP.md
+*_WORKFLOW.md
+*_COMPLETE.md
+*_INSTRUCTIONS.md
+*_FIXED.md
+*_THEME.md
+*_IMPROVEMENTS.md
+*_INTEGRATION.md
+*_REDESIGN.md
+*_CERTIFICATE.md
+FORCE_*.html
+clear-cache.sh
+test-webhook.html

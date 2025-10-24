@@ -11,7 +11,9 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
-  Receipt
+  Receipt,
+  UserCog,
+  Tag
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -23,13 +25,15 @@ import pamoonLogo from '@/assets/pamoontoy.png';
 const Sidebar = ({ currentPage, setCurrentPage, onLogout, collapsed = false, setCollapsed = () => {} }) => {
   const menuItems = [
     { id: 'dashboard', label: 'แดชบอร์ด', icon: LayoutDashboard, path: '', badge: null },
-    { id: 'products', label: 'จัดการสินค้า', icon: Package, path: 'products', badge: '142' },
-    { id: 'users', label: 'จัดการผู้ใช้', icon: Users, path: 'users', badge: '1.2k' },
-    { id: 'orders', label: 'คำสั่งซื้อ', icon: ShoppingCart, path: 'orders', badge: '23' },
-    { id: 'payments', label: 'ตรวจสอบการชำระเงิน', icon: Receipt, path: 'payments', badge: '8' },
-    { id: 'messages', label: 'ข้อความติดต่อ', icon: MessageSquare, path: 'messages', badge: '5' },
+    { id: 'products', label: 'จัดการสินค้า', icon: Package, path: 'products', badge: null },
+    { id: 'users', label: 'จัดการผู้ใช้', icon: Users, path: 'users', badge: null },
+    { id: 'admins', label: 'จัดการแอดมิน', icon: UserCog, path: 'admins', badge: null },
+    { id: 'orders', label: 'คำสั่งซื้อ', icon: ShoppingCart, path: 'orders', badge: null },
+    { id: 'payments', label: 'ตรวจสอบการชำระเงิน', icon: Receipt, path: 'payments', badge: null },
+    { id: 'discounts', label: 'โค้ดส่วนลด', icon: Tag, path: 'discounts', badge: null },
     { id: 'categories', label: 'หมวดหมู่', icon: FolderTree, path: 'categories', badge: null },
-    { id: 'reviews', label: 'รีวิวสินค้า', icon: Star, path: 'reviews', badge: '18' },
+    { id: 'messages', label: 'ข้อความติดต่อ', icon: MessageSquare, path: 'messages', badge: null },
+    { id: 'reviews', label: 'รีวิวสินค้า', icon: Star, path: 'reviews', badge: null },
   ];
 
   return (

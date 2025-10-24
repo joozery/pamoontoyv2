@@ -57,14 +57,19 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { toast } from '@/components/ui/use-toast';
+import { apiService } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 const UserManagement = () => {
   const [users, setUsers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterRole, setFilterRole] = useState('all');
   const [selectedUser, setSelectedUser] = useState(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '',
     email: '',
@@ -72,112 +77,84 @@ const UserManagement = () => {
     address: ''
   });
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
 
-  const loadUsers = () => {
-    const stored = JSON.parse(localStorage.getItem('users') || '[]');
-    if (stored.length === 0) {
-      const sampleUsers = [
-        {
-          id: '1',
-          name: 'สมชาย ใจดี',
-          email: 'somchai@example.com',
-          phone: '081-234-5678',
-          address: '123 ถนนสุขุมวิท กรุงเทพฯ',
-          status: 'active',
-          role: 'member',
-          joinedAt: '2024-01-15T10:30:00',
-          totalOrders: 12,
-          totalSpent: 45800,
-          wonAuctions: 8,
-          level: 'Gold'
-        },
-        {
-          id: '2',
-          name: 'สมหญิง รักสวย',
-          email: 'somying@example.com',
-          phone: '082-345-6789',
-          address: '456 ถนนพระราม 9 กรุงเทพฯ',
-          status: 'active',
-          role: 'member',
-          joinedAt: '2024-02-20T14:15:00',
-          totalOrders: 8,
-          totalSpent: 28900,
-          wonAuctions: 5,
-          level: 'Silver'
-        },
-        {
-          id: '3',
-          name: 'วิชัย มีสุข',
-          email: 'wichai@example.com',
-          phone: '083-456-7890',
-          address: '789 ถนนเพชรบุรี กรุงเทพฯ',
-          status: 'active',
-          role: 'vip',
-          joinedAt: '2023-11-10T09:00:00',
-          totalOrders: 25,
-          totalSpent: 125000,
-          wonAuctions: 18,
-          level: 'Platinum'
-        },
-        {
-          id: '4',
-          name: 'นภา สวยงาม',
-          email: 'napa@example.com',
-          phone: '084-567-8901',
-          address: '321 ถนนสีลม กรุงเทพฯ',
-          status: 'suspended',
-          role: 'member',
-          joinedAt: '2024-03-05T16:45:00',
-          totalOrders: 3,
-          totalSpent: 8500,
-          wonAuctions: 2,
-          level: 'Bronze'
-        },
-        {
-          id: '5',
-          name: 'ประสิทธิ์ ดีมาก',
-          email: 'prasit@example.com',
-          phone: '085-678-9012',
-          address: '654 ถนนรัชดาภิเษก กรุงเทพฯ',
-          status: 'active',
-          role: 'member',
-          joinedAt: '2024-01-28T11:20:00',
-          totalOrders: 15,
-          totalSpent: 62300,
-          wonAuctions: 10,
-          level: 'Gold'
-        }
-      ];
-      localStorage.setItem('users', JSON.stringify(sampleUsers));
-      setUsers(sampleUsers);
-    } else {
-      setUsers(stored);
+  useEffect(() => {
+    // Check if user is authenticated and is admin
+    if (!isAuthenticated()) {
+      navigate('/admin/login');
+      return;
+    }
+    
+    if (user && user.role !== 'admin') {
+      toast({
+        title: "ไม่มีสิทธิ์เข้าถึง",
+        description: "คุณต้องเป็น Admin ถึงจะเข้าถึงหน้านี้ได้",
+        variant: "destructive"
+      });
+      navigate('/admin/dashboard');
+      return;
+    }
+
+    loadUsers();
+  }, [user, isAuthenticated, navigate]);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const response = await apiService.admin.getUsers();
+      if (response.data.success) {
+        // Filter out admin users, only show regular users (members, vip)
+        const regularUsers = response.data.data.filter(user => user.role !== 'admin');
+        setUsers(regularUsers);
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถโหลดข้อมูล users ได้",
+        variant: "destructive"
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleDelete = (id) => {
-    const updated = users.filter(u => u.id !== id);
-    localStorage.setItem('users', JSON.stringify(updated));
-    setUsers(updated);
-    toast({
-      title: "ลบผู้ใช้สำเร็จ",
-      description: "ลบบัญชีผู้ใช้ออกจากระบบแล้ว",
-    });
+  const handleDelete = async (id) => {
+    try {
+      await apiService.admin.deleteUser(id);
+      toast({
+        title: "ลบผู้ใช้สำเร็จ",
+        description: "ลบบัญชีผู้ใช้ออกจากระบบแล้ว",
+      });
+      loadUsers(); // Reload users
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถลบผู้ใช้ได้",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleToggleStatus = (id) => {
-    const updated = users.map(u =>
-      u.id === id ? { ...u, status: u.status === 'active' ? 'suspended' : 'active' } : u
-    );
-    localStorage.setItem('users', JSON.stringify(updated));
-    setUsers(updated);
-    toast({
-      title: "อัปเดตสถานะสำเร็จ",
-      description: "เปลี่ยนสถานะผู้ใช้แล้ว",
-    });
+  const handleToggleStatus = async (id) => {
+    try {
+      // This would need a separate API endpoint for status update
+      toast({
+        title: "ฟีเจอร์ยังไม่พร้อม",
+        description: "การเปลี่ยนสถานะผู้ใช้ยังไม่พร้อมใช้งาน",
+        variant: "destructive"
+      });
+    } catch (error) {
+      console.error('Error updating status:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถเปลี่ยนสถานะได้",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleEdit = (user) => {
@@ -185,23 +162,29 @@ const UserManagement = () => {
       name: user.name,
       email: user.email,
       phone: user.phone,
-      address: user.address
+      address: user.address || ''
     });
     setSelectedUser(user);
     setIsEditDialogOpen(true);
   };
 
-  const handleSaveEdit = () => {
-    const updated = users.map(u =>
-      u.id === selectedUser.id ? { ...u, ...editForm } : u
-    );
-    localStorage.setItem('users', JSON.stringify(updated));
-    setUsers(updated);
-    setIsEditDialogOpen(false);
-    toast({
-      title: "บันทึกข้อมูลสำเร็จ",
-      description: "อัปเดตข้อมูลผู้ใช้แล้ว",
-    });
+  const handleSaveEdit = async () => {
+    try {
+      await apiService.admin.updateUser(selectedUser.id, editForm);
+      toast({
+        title: "บันทึกข้อมูลสำเร็จ",
+        description: "อัปเดตข้อมูลผู้ใช้แล้ว",
+      });
+      setIsEditDialogOpen(false);
+      loadUsers(); // Reload users
+    } catch (error) {
+      console.error('Error updating user:', error);
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถอัปเดตข้อมูลได้",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleView = (user) => {
@@ -227,18 +210,20 @@ const UserManagement = () => {
     const matchesSearch = 
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.phone.includes(searchTerm);
+      (u.phone && u.phone.includes(searchTerm));
     
     const matchesStatus = filterStatus === 'all' || u.status === filterStatus;
+    const matchesRole = filterRole === 'all' || u.role === filterRole;
     
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesRole;
   });
 
   const stats = {
     total: users.length,
-    active: users.filter(u => u.status === 'active').length,
+    active: users.filter(u => u.status === 'active' || !u.status).length, // Default to active if no status
     suspended: users.filter(u => u.status === 'suspended').length,
     vip: users.filter(u => u.role === 'vip').length,
+    member: users.filter(u => u.role === 'member').length,
   };
 
   const getStatusBadge = (status) => {
@@ -357,6 +342,19 @@ const UserManagement = () => {
                     <SelectItem value="all">ทั้งหมด</SelectItem>
                     <SelectItem value="active">ใช้งาน</SelectItem>
                     <SelectItem value="suspended">ระงับ</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Filter Role */}
+                <Select value={filterRole} onValueChange={setFilterRole}>
+                  <SelectTrigger className="w-[140px] h-9">
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    <SelectValue placeholder="ประเภท" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">ทั้งหมด</SelectItem>
+                    <SelectItem value="member">สมาชิก</SelectItem>
+                    <SelectItem value="vip">VIP</SelectItem>
                   </SelectContent>
                 </Select>
 

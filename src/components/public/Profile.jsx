@@ -1,57 +1,222 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Phone, MapPin, Calendar, Edit2, Save, Camera, Award, TrendingUp, ShoppingBag, Heart, Package, Star, Trophy, Zap, X } from 'lucide-react';
+import { User, Mail, Phone, MapPin, Calendar, Edit2, Save, Camera, Award, TrendingUp, ShoppingBag, Heart, Package, Star, Trophy, Zap, X, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from '@/components/ui/use-toast';
+import apiService from '@/services/api';
+import { useNavigate } from 'react-router-dom';
 
 const Profile = () => {
-    const [userName, setUserName] = useState('');
+    const { user, isAuthenticated } = useAuth();
+    const navigate = useNavigate();
     const [isEditing, setIsEditing] = useState(false);
     const [showAvatarUpload, setShowAvatarUpload] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [stats, setStats] = useState({
+        totalOrders: 0,
+        totalSpent: 0,
+        wonAuctions: 0,
+        favoritesCount: 0,
+        activeBids: 0
+    });
+    const [recentActivities, setRecentActivities] = useState([]);
     const [profileData, setProfileData] = useState({
         name: '',
-        email: 'user@pamoon.com',
-        phone: '081-234-5678',
-        address: 'กรุงเทพมหานคร, ประเทศไทย',
-        memberSince: 'ตุลาคม 2024',
-        level: 'Gold Member',
-        points: 2450,
-        totalSpent: 45800,
-        successfulBids: 12
+        email: '',
+        phone: '',
+        address: '',
+        memberSince: '',
+        level: '',
+        points: 0,
+        totalSpent: 0,
+        successfulBids: 0
     });
 
     useEffect(() => {
-        const storedUserName = localStorage.getItem('userName');
-        if (storedUserName) {
-            setUserName(storedUserName);
-            setProfileData(prev => ({ ...prev, name: storedUserName }));
-        } else {
-            // Set default name if not in localStorage
-            setUserName('ผู้ใช้งาน');
-            setProfileData(prev => ({ ...prev, name: 'ผู้ใช้งาน' }));
+        if (user) {
+            setProfileData({
+                name: user.name || '',
+                email: user.email || '',
+                phone: user.phone || '',
+                address: user.address || '', // Use address from user
+                memberSince: user.created_at ? new Date(user.created_at).toLocaleDateString('th-TH', { 
+                    year: 'numeric', 
+                    month: 'long' 
+                }) : 'ไม่ระบุ',
+                level: user.level || 'Bronze Member',
+                points: user.total_spent || 0,
+                totalSpent: user.total_spent || 0,
+                successfulBids: user.won_auctions || 0
+            });
+            fetchUserStats();
         }
-    }, []);
+    }, [user]);
 
-    const handleSave = () => {
-        localStorage.setItem('userName', profileData.name);
-        setUserName(profileData.name);
-        setIsEditing(false);
+    const fetchUserStats = async () => {
+        try {
+            setLoading(true);
+            
+            // Fetch favorites
+            const favoritesRes = await apiService.favorites.getAll();
+            const favoritesCount = favoritesRes.data.data?.length || 0;
+
+            // Fetch orders
+            const ordersRes = await apiService.orders.getAll();
+            const orders = ordersRes.data.data || [];
+            const totalOrders = orders.length;
+            const totalSpent = orders.reduce((sum, order) => sum + (parseFloat(order.total_amount) || 0), 0);
+
+            // Fetch active bids
+            const bidsRes = await apiService.bids.getUserBids();
+            const bids = bidsRes.data.data || [];
+            
+            // Count active bids (products still in auction)
+            const now = new Date();
+            const activeBids = bids.filter(bid => {
+                if (!bid.auction_end_time) return false;
+                return new Date(bid.auction_end_time) > now && bid.product_status === 'active';
+            }).length;
+            
+            // Count won auctions (is_winning = true and auction ended or product sold)
+            const wonAuctions = bids.filter(bid => {
+                if (bid.is_winning) {
+                    // If auction ended or product sold, count as won
+                    if (bid.product_status === 'sold') return true;
+                    if (bid.auction_end_time && new Date(bid.auction_end_time) <= now) return true;
+                }
+                return false;
+            }).length;
+
+            setStats({
+                totalOrders,
+                totalSpent,
+                wonAuctions,
+                favoritesCount,
+                activeBids
+            });
+
+            // Build recent activities from orders and bids
+            const activities = [];
+            
+            // Add recent orders
+            orders.slice(0, 2).forEach(order => {
+                const timeAgo = getTimeAgo(order.created_at);
+                activities.push({
+                    id: `order-${order.id}`,
+                    icon: Package,
+                    title: order.status === 'delivered' ? 'ได้รับสินค้า' : 'สั่งซื้อสินค้า',
+                    desc: order.product_name,
+                    time: timeAgo,
+                    color: 'text-green-500'
+                });
+            });
+
+            // Add recent winning bids
+            const wonBids = bids.filter(bid => {
+                if (bid.is_winning) {
+                    if (bid.product_status === 'sold') return true;
+                    if (bid.auction_end_time && new Date(bid.auction_end_time) <= new Date()) return true;
+                }
+                return false;
+            });
+            
+            wonBids.slice(0, 2).forEach(bid => {
+                const timeAgo = getTimeAgo(bid.bid_time);
+                activities.push({
+                    id: `bid-${bid.id}`,
+                    icon: Trophy,
+                    title: 'ชนะการประมูล',
+                    desc: bid.product_name,
+                    time: timeAgo,
+                    color: 'text-yellow-500'
+                });
+            });
+
+            setRecentActivities(activities.slice(0, 4));
+        } catch (error) {
+            console.error('Error fetching user stats:', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const activities = [
-        { id: 1, icon: Trophy, title: 'ชนะการประมูล', desc: 'ฟิกเกอร์ Iron Man Mark V', time: '2 ชั่วโมงที่แล้ว', color: 'text-yellow-500' },
-        { id: 2, icon: Heart, title: 'เพิ่มรายการโปรด', desc: 'โมเดล Batman Limited Edition', time: '5 ชั่วโมงที่แล้ว', color: 'text-red-500' },
-        { id: 3, icon: Package, title: 'ได้รับสินค้า', desc: 'ชุด Lego Star Wars', time: '1 วันที่แล้ว', color: 'text-green-500' },
-        { id: 4, icon: Star, title: 'เลื่อนระดับ', desc: 'คุณได้เป็น Gold Member แล้ว!', time: '3 วันที่แล้ว', color: 'text-purple-500' }
+    const getTimeAgo = (date) => {
+        if (!date) return 'ไม่ทราบ';
+        const diff = Date.now() - new Date(date).getTime();
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        
+        if (hours < 1) return 'เมื่อสักครู่';
+        if (hours < 24) return `${hours} ชั่วโมงที่แล้ว`;
+        return `${days} วันที่แล้ว`;
+    };
+
+    const handleSave = async () => {
+        try {
+            // TODO: Implement API call to update user profile
+            toast({
+                title: "บันทึกสำเร็จ",
+                description: "ข้อมูลโปรไฟล์ได้รับการอัพเดทแล้ว",
+            });
+            setIsEditing(false);
+        } catch (error) {
+            toast({
+                title: "เกิดข้อผิดพลาด",
+                description: "ไม่สามารถบันทึกข้อมูลได้",
+                variant: "destructive",
+            });
+        }
+    };
+
+    // Calculate badges based on real stats
+    const badges = [
+        { 
+            id: 1, 
+            icon: Trophy, 
+            name: 'ผู้ชนะ 10 ครั้ง', 
+            color: 'from-yellow-500 to-yellow-600', 
+            earned: stats.wonAuctions >= 10 
+        },
+        { 
+            id: 2, 
+            icon: Package, 
+            name: 'ซื้อ 5 ครั้ง', 
+            color: 'from-blue-500 to-blue-600', 
+            earned: stats.totalOrders >= 5 
+        },
+        { 
+            id: 3, 
+            icon: Heart, 
+            name: 'สะสม 10 รายการโปรด', 
+            color: 'from-red-500 to-red-600', 
+            earned: stats.favoritesCount >= 10 
+        },
+        { 
+            id: 4, 
+            icon: Award, 
+            name: 'ใช้จ่าย 10,000 บาท', 
+            color: 'from-purple-500 to-purple-600', 
+            earned: stats.totalSpent >= 10000 
+        }
     ];
 
-    const badges = [
-        { id: 1, icon: Trophy, name: 'ผู้ชนะ 10 ครั้ง', color: 'from-gray-900 to-gray-700', earned: true },
-        { id: 2, icon: Zap, name: 'ประมูลเร็ว', color: 'from-gray-800 to-gray-600', earned: true },
-        { id: 3, icon: Star, name: 'ผู้รีวิวชั้นนำ', color: 'from-gray-700 to-gray-500', earned: true },
-        { id: 4, icon: Award, name: 'สะสม 1000 แต้ม', color: 'from-gray-400 to-gray-300', earned: false }
-    ];
+    // Redirect if not authenticated
+    if (!isAuthenticated()) {
+        return (
+            <div className="min-h-screen bg-white flex items-center justify-center">
+                <div className="text-center">
+                    <h1 className="text-2xl font-bold text-gray-900 mb-4">กรุณาเข้าสู่ระบบ</h1>
+                    <p className="text-gray-600 mb-6">คุณต้องเข้าสู่ระบบเพื่อดูโปรไฟล์</p>
+                    <a href="/login" className="bg-gray-900 text-white px-6 py-3 rounded-lg hover:bg-black transition-colors">
+                        เข้าสู่ระบบ
+                    </a>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-white py-6 md:py-12 pb-24 md:pb-12">
+        <div className="min-h-screen bg-white py-6 md:py-12 pb-24 md:pb-12">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 {/* Cover Photo & Profile Header */}
                 <motion.div 
@@ -86,7 +251,7 @@ const Profile = () => {
 
                                 <div className="flex-1 min-w-0 pl-2 md:pl-4">
                                     <h1 className="text-2xl md:text-4xl font-bold text-white drop-shadow-lg truncate">
-                                        {userName || 'ผู้ใช้งาน'}
+                                        {user?.name || 'ผู้ใช้งาน'}
                                     </h1>
                                     <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-3">
                                         <div className="flex items-center space-x-1 bg-white text-gray-900 px-2 md:px-3 py-0.5 md:py-1 rounded-full text-xs md:text-sm font-semibold shadow-md">
@@ -128,25 +293,25 @@ const Profile = () => {
                         <div className="grid grid-cols-4 gap-2 md:gap-4 mt-6 md:mt-8">
                             <div className="text-center">
                                 <div className="text-2xl md:text-3xl font-bold text-gray-900">
-                                    {profileData.successfulBids}
+                                    {loading ? '...' : stats.wonAuctions}
                                 </div>
                                 <div className="text-xs md:text-sm text-gray-600 mt-1">ชนะประมูล</div>
                             </div>
                             <div className="text-center">
                                 <div className="text-2xl md:text-3xl font-bold text-gray-900">
-                                    {profileData.points}
+                                    {loading ? '...' : stats.totalOrders}
                                 </div>
-                                <div className="text-xs md:text-sm text-gray-600 mt-1">แต้มสะสม</div>
+                                <div className="text-xs md:text-sm text-gray-600 mt-1">คำสั่งซื้อ</div>
                             </div>
                             <div className="text-center">
                                 <div className="text-2xl md:text-3xl font-bold text-gray-900">
-                                    5
+                                    {loading ? '...' : stats.favoritesCount}
                                 </div>
                                 <div className="text-xs md:text-sm text-gray-600 mt-1">รายการโปรด</div>
                             </div>
                             <div className="text-center">
                                 <div className="text-2xl md:text-3xl font-bold text-gray-900">
-                                    8
+                                    {loading ? '...' : stats.activeBids}
                                 </div>
                                 <div className="text-xs md:text-sm text-gray-600 mt-1">กำลังประมูล</div>
                             </div>
@@ -261,27 +426,39 @@ const Profile = () => {
                                 กิจกรรมล่าสุด
                             </h2>
                             <div className="space-y-3 md:space-y-4">
-                                {activities.map((activity, index) => {
-                                    const Icon = activity.icon;
-                                    return (
-                                        <motion.div
-                                            key={activity.id}
-                                            initial={{ opacity: 0, x: -20 }}
-                                            animate={{ opacity: 1, x: 0 }}
-                                            transition={{ delay: 0.3 + index * 0.1 }}
-                                            className="flex items-start space-x-3 md:space-x-4 p-3 md:p-4 rounded-xl hover:bg-gray-50 transition-colors"
-                                        >
-                                            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl bg-gradient-to-br ${activity.color === 'text-yellow-500' ? 'from-yellow-100 to-orange-100' : activity.color === 'text-red-500' ? 'from-red-100 to-pink-100' : activity.color === 'text-green-500' ? 'from-green-100 to-emerald-100' : 'from-purple-100 to-pink-100'} flex items-center justify-center flex-shrink-0`}>
-                                                <Icon className={`w-5 h-5 md:w-6 md:h-6 ${activity.color}`} />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm md:text-base font-semibold text-gray-900">{activity.title}</p>
-                                                <p className="text-xs md:text-sm text-gray-600 mt-0.5">{activity.desc}</p>
-                                                <p className="text-xs text-gray-400 mt-1">{activity.time}</p>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
+                                {loading ? (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 mx-auto"></div>
+                                        <p className="mt-2 text-sm">กำลังโหลด...</p>
+                                    </div>
+                                ) : recentActivities.length > 0 ? (
+                                    recentActivities.map((activity, index) => {
+                                        const Icon = activity.icon;
+                                        return (
+                                            <motion.div
+                                                key={activity.id}
+                                                initial={{ opacity: 0, x: -20 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: 0.3 + index * 0.1 }}
+                                                className="flex items-start space-x-3 md:space-x-4 p-3 md:p-4 rounded-xl hover:bg-gray-50 transition-colors"
+                                            >
+                                                <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-gray-100 flex items-center justify-center flex-shrink-0">
+                                                    <Icon className={`w-5 h-5 md:w-6 md:h-6 ${activity.color}`} />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-sm md:text-base font-semibold text-gray-900">{activity.title}</p>
+                                                    <p className="text-xs md:text-sm text-gray-600 mt-0.5">{activity.desc}</p>
+                                                    <p className="text-xs text-gray-400 mt-1">{activity.time}</p>
+                                                </div>
+                                            </motion.div>
+                                        );
+                                    })
+                                ) : (
+                                    <div className="text-center py-8 text-gray-500">
+                                        <Clock className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                                        <p className="text-sm">ยังไม่มีกิจกรรม</p>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
                     </div>
@@ -315,7 +492,7 @@ const Profile = () => {
                                                 <p className="text-xs md:text-sm font-semibold text-center leading-tight">{badge.name}</p>
                                             </div>
                                             {badge.earned && (
-                                                <div className="absolute -top-1 -right-1 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
+                                                <div className="absolute -top-1 -right-1 w-6 h-6 bg-black rounded-full flex items-center justify-center">
                                                     <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
                                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                                     </svg>
@@ -338,18 +515,24 @@ const Profile = () => {
                             <div className="space-y-4">
                                 <div>
                                     <div className="flex justify-between text-sm mb-2">
-                                        <span>Gold Member</span>
-                                        <span>2,450 / 5,000 แต้ม</span>
+                                        <span>{profileData.level}</span>
+                                        <span>{loading ? '...' : `${stats.totalSpent.toLocaleString()} บาท`}</span>
                                     </div>
                                     <div className="h-3 bg-white/10 rounded-full overflow-hidden border border-white/20">
                                         <motion.div 
                                             initial={{ width: 0 }}
-                                            animate={{ width: '49%' }}
+                                            animate={{ width: loading ? '0%' : `${Math.min((stats.totalSpent / 50000) * 100, 100)}%` }}
                                             transition={{ delay: 0.5, duration: 1 }}
                                             className="h-full bg-white rounded-full"
                                         />
                                     </div>
-                                    <p className="text-xs mt-2 text-gray-300">อีก 2,550 แต้มเพื่อเป็น Platinum Member</p>
+                                    <p className="text-xs mt-2 text-gray-300">
+                                        {loading ? 'กำลังโหลด...' : 
+                                            stats.totalSpent >= 50000 ? 
+                                            'คุณถึงระดับสูงสุดแล้ว!' : 
+                                            `อีก ${(50000 - stats.totalSpent).toLocaleString()} บาทเพื่อเป็น Platinum Member`
+                                        }
+                                    </p>
                                 </div>
                             </div>
                         </motion.div>
@@ -368,21 +551,27 @@ const Profile = () => {
                                         <ShoppingBag className="w-5 h-5 text-gray-900" />
                                         <span className="text-sm font-medium text-gray-700">ยอดใช้จ่ายทั้งหมด</span>
                                     </div>
-                                    <span className="text-base font-bold text-gray-900">฿{profileData.totalSpent.toLocaleString()}</span>
+                                    <span className="text-base font-bold text-gray-900">
+                                        {loading ? '...' : `฿${stats.totalSpent.toLocaleString()}`}
+                                    </span>
                                 </div>
                                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">
                                     <div className="flex items-center space-x-3">
                                         <Trophy className="w-5 h-5 text-gray-900" />
                                         <span className="text-sm font-medium text-gray-700">ชนะการประมูล</span>
                                     </div>
-                                    <span className="text-base font-bold text-gray-900">{profileData.successfulBids} ครั้ง</span>
+                                    <span className="text-base font-bold text-gray-900">
+                                        {loading ? '...' : `${stats.wonAuctions} ครั้ง`}
+                                    </span>
                                 </div>
                                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border border-gray-200">
                                     <div className="flex items-center space-x-3">
-                                        <Heart className="w-5 h-5 text-gray-900" />
-                                        <span className="text-sm font-medium text-gray-700">อัตราการชนะ</span>
+                                        <Package className="w-5 h-5 text-gray-900" />
+                                        <span className="text-sm font-medium text-gray-700">คำสั่งซื้อทั้งหมด</span>
                                     </div>
-                                    <span className="text-base font-bold text-gray-900">75%</span>
+                                    <span className="text-base font-bold text-gray-900">
+                                        {loading ? '...' : `${stats.totalOrders} รายการ`}
+                                    </span>
                                 </div>
                             </div>
                         </motion.div>

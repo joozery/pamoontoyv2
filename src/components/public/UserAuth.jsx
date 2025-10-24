@@ -1,22 +1,28 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Mail, User, Lock, ArrowLeft } from 'lucide-react';
+import { Eye, EyeOff, Mail, User, Lock, ArrowLeft, Phone, MessageCircle, Facebook } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { Helmet } from 'react-helmet';
 import { Link } from 'react-router-dom';
 import pamoonLogo from '@/assets/pamoontoy.png';
+import { useAuth } from '@/contexts/AuthContext';
 
 const UserAuth = () => {
   const navigate = useNavigate();
+  const { login, register } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     name: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    phone: '',
+    lineId: '',
+    facebookName: ''
   });
 
   const handleInputChange = (e) => {
@@ -26,35 +32,53 @@ const UserAuth = () => {
     });
   };
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    // Mock login - คุณสามารถเชื่อมต่อกับ API จริงได้
-    if (formData.email && formData.password) {
-      localStorage.setItem('userAuth', 'true');
-      localStorage.setItem('userName', formData.email.split('@')[0]);
-      toast({
-        title: "เข้าสู่ระบบสำเร็จ! 🎉",
-        description: `ยินดีต้อนรับกลับมา ${formData.email.split('@')[0]}`,
-      });
-      navigate('/');
-    } else {
+    setLoading(true);
+    
+    if (!formData.email || !formData.password) {
       toast({
         title: "กรุณากรอกข้อมูลให้ครบ",
         description: "โปรดระบุอีเมลและรหัสผ่าน",
         variant: "destructive",
       });
+      setLoading(false);
+      return;
     }
+
+    const result = await login({
+      email: formData.email,
+      password: formData.password
+    });
+
+    if (result.success) {
+      toast({
+        title: "เข้าสู่ระบบสำเร็จ! 🎉",
+        description: `ยินดีต้อนรับกลับมา ${result.data.user.name}`,
+      });
+      navigate('/');
+    } else {
+      toast({
+        title: "เข้าสู่ระบบไม่สำเร็จ",
+        description: result.message,
+        variant: "destructive",
+      });
+    }
+    
+    setLoading(false);
   };
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
+    setLoading(true);
     
-    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword) {
+    if (!formData.name || !formData.email || !formData.password || !formData.confirmPassword || !formData.phone || !formData.lineId || !formData.facebookName) {
       toast({
         title: "กรุณากรอกข้อมูลให้ครบ",
         description: "โปรดกรอกข้อมูลทุกช่อง",
         variant: "destructive",
       });
+      setLoading(false);
       return;
     }
 
@@ -64,6 +88,7 @@ const UserAuth = () => {
         description: "กรุณาตรวจสอบรหัสผ่านอีกครั้ง",
         variant: "destructive",
       });
+      setLoading(false);
       return;
     }
 
@@ -76,14 +101,28 @@ const UserAuth = () => {
       return;
     }
 
-    // Mock registration
-    localStorage.setItem('userAuth', 'true');
-    localStorage.setItem('userName', formData.name);
-    toast({
-      title: "สมัครสมาชิกสำเร็จ! 🎊",
-      description: `ยินดีต้อนรับ ${formData.name} สู่ PAMOON`,
+    const result = await register({
+      name: formData.name,
+      email: formData.email,
+      password: formData.password,
+      phone: formData.phone
     });
-    navigate('/');
+
+    if (result.success) {
+      toast({
+        title: "สมัครสมาชิกสำเร็จ! 🎊",
+        description: `ยินดีต้อนรับ ${result.data.user.name} สู่ PAMOON`,
+      });
+      navigate('/');
+    } else {
+      toast({
+        title: "สมัครสมาชิกไม่สำเร็จ",
+        description: result.message,
+        variant: "destructive",
+      });
+    }
+    
+    setLoading(false);
   };
 
   const toggleMode = () => {
@@ -138,18 +177,59 @@ const UserAuth = () => {
 
           <form onSubmit={isLogin ? handleLogin : handleRegister} className="space-y-4">
             {!isLogin && (
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  placeholder="ชื่อของคุณ"
-                  className="w-full pl-10 pr-3 py-2.5 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
-                  required={!isLogin}
-                />
-              </div>
+              <>
+                <div className="relative">
+                  <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    placeholder="ชื่อของคุณ"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
+                    required={!isLogin}
+                  />
+                </div>
+
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="tel"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleInputChange}
+                    placeholder="เบอร์โทรศัพท์"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
+                    required={!isLogin}
+                  />
+                </div>
+
+                <div className="relative">
+                  <MessageCircle className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    name="lineId"
+                    value={formData.lineId}
+                    onChange={handleInputChange}
+                    placeholder="ไอดีไลน์"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
+                    required={!isLogin}
+                  />
+                </div>
+
+                <div className="relative">
+                  <Facebook className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    name="facebookName"
+                    value={formData.facebookName}
+                    onChange={handleInputChange}
+                    placeholder="ชื่อ Facebook"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 transition-all"
+                    required={!isLogin}
+                  />
+                </div>
+              </>
             )}
 
             <div className="relative">
@@ -214,9 +294,10 @@ const UserAuth = () => {
 
             <Button 
               type="submit" 
-              className="w-full bg-white text-black hover:bg-gray-200 py-2.5 rounded-lg font-semibold text-sm transition-all shadow-lg hover:shadow-xl"
+              disabled={loading}
+              className="w-full bg-white text-black hover:bg-gray-200 py-2.5 rounded-lg font-semibold text-sm transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'}
+              {loading ? 'กำลังประมวลผล...' : (isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก')}
             </Button>
           </form>
 

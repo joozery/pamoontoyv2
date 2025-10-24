@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import Sidebar from '@/components/Sidebar';
 import { Helmet } from 'react-helmet';
 import { Menu, Bell, User, Search, Sun, Moon } from 'lucide-react';
@@ -58,8 +57,10 @@ const AdminLayout = () => {
     dashboard: 'แดชบอร์ด',
     products: 'จัดการสินค้า',
     users: 'จัดการผู้ใช้',
+    admins: 'จัดการแอดมิน',
     orders: 'คำสั่งซื้อ',
     payments: 'ตรวจสอบการชำระเงิน',
+    discounts: 'โค้ดส่วนลด',
     messages: 'ข้อความติดต่อ',
     categories: 'หมวดหมู่',
     reviews: 'รีวิวสินค้า',
@@ -69,8 +70,10 @@ const AdminLayout = () => {
     dashboard: 'ภาพรวมระบบและสถิติสำคัญ',
     products: 'จัดการสินค้าและการประมูล',
     users: 'จัดการข้อมูลผู้ใช้งาน',
+    admins: 'จัดการแอดมินและสิทธิ์การเข้าถึง',
     orders: 'ติดตามและจัดการคำสั่งซื้อ',
     payments: 'ตรวจสอบสลิปโอนเงินและอัปเดทเลขพัสดุ',
+    discounts: 'จัดการโค้ดส่วนลดและโปรโมชั่น',
     messages: 'ตอบกลับข้อความและคำถาม',
     categories: 'จัดการหมวดหมู่สินค้า',
     reviews: 'ดูและจัดการรีวิวสินค้า',
@@ -216,17 +219,7 @@ const AdminLayout = () => {
 
           {/* Main Content */}
           <main className="flex-1 p-4 md:p-6">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={currentPage}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.2 }}
-              >
-                <Outlet />
-              </motion.div>
-            </AnimatePresence>
+            <Outlet />
           </main>
         </div>
       </div>

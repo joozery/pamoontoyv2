@@ -1,290 +1,393 @@
-import React, { useState } from 'react';
-import { Package, Clock, CheckCircle, XCircle, Truck, MapPin, Phone, ChevronRight, Filter, Search } from 'lucide-react';
-import { motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Package, Clock, CheckCircle, XCircle, Truck, ChevronRight, Search, ShoppingCart, CreditCard, CheckSquare, Square } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { apiService } from '@/services/api';
+import { toast } from '@/components/ui/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import Swal from 'sweetalert2';
 
 const Orders = () => {
+    const navigate = useNavigate();
+    const { isAuthenticated } = useAuth();
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selectedOrders, setSelectedOrders] = useState([]);
 
-    const orders = [
-        {
-            id: 'ORD001',
-            productName: 'ฟิกเกอร์ Iron Man Mark V',
-            price: 6800,
-            status: 'completed',
-            date: '15 ตุลาคม 2024',
-            deliveryDate: '18 ตุลาคม 2024',
-            image: 'https://images.unsplash.com/photo-1559223669-e0065fa7f142',
-            trackingNumber: 'TH1234567890'
-        },
-        {
-            id: 'ORD002',
-            productName: 'โมเดล Batman Limited Edition',
-            price: 4800,
-            status: 'shipping',
-            date: '18 ตุลาคม 2024',
-            estimatedDelivery: '22 ตุลาคม 2024',
-            image: 'https://images.unsplash.com/photo-1559223669-e0065fa7f142',
-            trackingNumber: 'TH0987654321'
-        },
-        {
-            id: 'ORD003',
-            productName: 'ของสะสม Transformers Vintage',
-            price: 9500,
-            status: 'pending',
-            date: '20 ตุลาคม 2024',
-            image: 'https://images.unsplash.com/photo-1559223669-e0065fa7f142'
-        },
-        {
-            id: 'ORD004',
-            productName: 'ชุด Lego Star Wars Millennium Falcon',
-            price: 12000,
-            status: 'shipping',
-            date: '16 ตุลาคม 2024',
-            estimatedDelivery: '21 ตุลาคม 2024',
-            image: 'https://images.unsplash.com/photo-1559223669-e0065fa7f142',
-            trackingNumber: 'TH5555666677'
-        },
-        {
-            id: 'ORD005',
-            productName: 'ฟิกเกอร์ Spider-Man Rare Edition',
-            price: 5200,
-            status: 'completed',
-            date: '12 ตุลาคม 2024',
-            deliveryDate: '15 ตุลาคม 2024',
-            image: 'https://images.unsplash.com/photo-1559223669-e0065fa7f142',
-            trackingNumber: 'TH9988776655'
+    useEffect(() => {
+        if (isAuthenticated()) {
+            fetchOrders();
+        } else {
+            setLoading(false);
         }
-    ];
+    }, [isAuthenticated]);
+
+    const fetchOrders = async () => {
+        try {
+            setLoading(true);
+            const response = await apiService.orders.getAll();
+            const ordersData = response.data.data || [];
+            setOrders(ordersData);
+        } catch (error) {
+            console.error('Error fetching orders:', error);
+            toast({
+                title: "เกิดข้อผิดพลาด",
+                description: "ไม่สามารถโหลดคำสั่งซื้อได้",
+                variant: "destructive"
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const statusFilters = [
         { id: 'all', label: 'ทั้งหมด', count: orders.length },
         { id: 'pending', label: 'รอชำระเงิน', count: orders.filter(o => o.status === 'pending').length },
-        { id: 'shipping', label: 'กำลังจัดส่ง', count: orders.filter(o => o.status === 'shipping').length },
-        { id: 'completed', label: 'สำเร็จ', count: orders.filter(o => o.status === 'completed').length }
+        { id: 'paid', label: 'ชำระแล้ว', count: orders.filter(o => o.status === 'paid').length },
+        { id: 'confirmed', label: 'ยืนยันแล้ว', count: orders.filter(o => o.status === 'confirmed' || o.tracking_number).length },
+        { id: 'shipped', label: 'จัดส่งแล้ว', count: orders.filter(o => o.shipped_at).length },
     ];
 
-    const getStatusInfo = (status) => {
-        switch (status) {
-            case 'completed':
-                return {
-                    label: 'จัดส่งสำเร็จ',
-                    color: 'bg-green-100 text-green-700 border-green-200',
-                    icon: CheckCircle,
-                    iconColor: 'text-green-500'
-                };
-            case 'shipping':
-                return {
-                    label: 'กำลังจัดส่ง',
-                    color: 'bg-blue-100 text-blue-700 border-blue-200',
-                    icon: Truck,
-                    iconColor: 'text-blue-500'
-                };
+    const getStatusBadge = (order) => {
+        if (order.shipped_at) {
+            return <Badge className="bg-purple-100 text-purple-800 border-purple-200 border">จัดส่งแล้ว</Badge>;
+        }
+        if (order.tracking_number) {
+            return <Badge className="bg-green-100 text-green-800 border-green-200 border">ยืนยันแล้ว</Badge>;
+        }
+        
+        switch (order.status) {
+            case 'paid':
+                return <Badge className="bg-blue-100 text-blue-800 border-blue-200 border">ชำระเงินแล้ว</Badge>;
             case 'pending':
-                return {
-                    label: 'รอการชำระเงิน',
-                    color: 'bg-yellow-100 text-yellow-700 border-yellow-200',
-                    icon: Clock,
-                    iconColor: 'text-yellow-500'
-                };
+                return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200 border">รอการชำระเงิน</Badge>;
             case 'cancelled':
-                return {
-                    label: 'ยกเลิกแล้ว',
-                    color: 'bg-red-100 text-red-700 border-red-200',
-                    icon: XCircle,
-                    iconColor: 'text-red-500'
-                };
+                return <Badge className="bg-red-100 text-red-800 border-red-200 border">ยกเลิกแล้ว</Badge>;
             default:
-                return {
-                    label: 'ไม่ทราบสถานะ',
-                    color: 'bg-gray-100 text-gray-700 border-gray-200',
-                    icon: Package,
-                    iconColor: 'text-gray-500'
-                };
+                return <Badge variant="secondary">ไม่ทราบสถานะ</Badge>;
         }
     };
 
+    const getImageUrl = (order) => {
+        if (order.product_image) return order.product_image;
+        if (order.product_images) {
+            try {
+                const images = typeof order.product_images === 'string' ? JSON.parse(order.product_images) : order.product_images;
+                if (Array.isArray(images) && images.length > 0) return images[0];
+            } catch (e) {
+                console.error('Error parsing images:', e);
+            }
+        }
+        return 'https://placehold.co/400x400/e5e7eb/9ca3af?text=No+Image';
+    };
+
     const filteredOrders = orders.filter(order => {
-        const matchesStatus = selectedStatus === 'all' || order.status === selectedStatus;
-        const matchesSearch = order.productName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                            order.id.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesStatus = selectedStatus === 'all' || 
+            (selectedStatus === 'pending' && order.status === 'pending') ||
+            (selectedStatus === 'paid' && order.status === 'paid') ||
+            (selectedStatus === 'confirmed' && (order.status === 'confirmed' || order.tracking_number)) ||
+            (selectedStatus === 'shipped' && order.shipped_at);
+        
+        const matchesSearch = (order.product_name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            order.id.toString().toLowerCase().includes(searchTerm.toLowerCase());
         return matchesStatus && matchesSearch;
     });
 
+    const pendingOrders = filteredOrders.filter(o => o.status === 'pending');
+
+    const toggleOrderSelection = (orderId) => {
+        setSelectedOrders(prev => 
+            prev.includes(orderId) 
+                ? prev.filter(id => id !== orderId)
+                : [...prev, orderId]
+        );
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedOrders.length === pendingOrders.length) {
+            setSelectedOrders([]);
+        } else {
+            setSelectedOrders(pendingOrders.map(o => o.id));
+        }
+    };
+
+    const handleBulkPayment = async () => {
+        if (selectedOrders.length === 0) return;
+
+        const selectedOrdersData = orders.filter(o => selectedOrders.includes(o.id));
+        const totalAmount = selectedOrdersData.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+
+        const result = await Swal.fire({
+            title: 'ยืนยันการชำระเงิน',
+            html: `
+                <div class="text-left">
+                    <p class="mb-2">คุณต้องการชำระเงินสำหรับ <strong>${selectedOrders.length}</strong> รายการ</p>
+                    <p class="text-2xl font-bold text-blue-600">รวม ฿${totalAmount.toLocaleString()}</p>
+                </div>
+            `,
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#3b82f6',
+            cancelButtonColor: '#6b7280',
+            confirmButtonText: 'ชำระเงิน',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (result.isConfirmed) {
+            navigate('/payment/bulk', { 
+                state: { 
+                    bulkPayment: true,
+                    orderIds: selectedOrders,
+                    orders: selectedOrdersData
+                } 
+            });
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
+                    <p className="text-gray-600">กำลังโหลดคำสั่งซื้อ...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-white py-6 md:py-12 pb-24 md:pb-12">
+        <div className="min-h-screen bg-gray-50 py-6 md:py-12 pb-32 md:pb-12">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 {/* Header */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mb-6 md:mb-8"
+                    className="mb-8"
                 >
-                    <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-2">คำสั่งซื้อของฉัน</h1>
-                    <p className="text-sm md:text-base text-gray-600">ติดตามสถานะการสั่งซื้อและประมูลที่ชนะของคุณ</p>
+                    <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">คำสั่งซื้อของฉัน</h1>
+                    <p className="text-gray-600">ติดตามสถานะการสั่งซื้อและประมูลที่ชนะของคุณ</p>
                 </motion.div>
 
-                {/* Search & Filter */}
+                {/* Search & Filter Card */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="bg-white rounded-2xl shadow-lg border border-gray-200 p-4 md:p-6 mb-6"
                 >
-                    {/* Search Bar */}
-                    <div className="relative mb-4">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="ค้นหาคำสั่งซื้อ..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-12 pr-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-gray-900 focus:border-transparent transition-all text-sm md:text-base"
-                        />
-                    </div>
+                    <Card className="mb-6">
+                        <CardContent className="pt-6">
+                            {/* Search Bar */}
+                            <div className="relative mb-4">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <Input
+                                    type="text"
+                                    placeholder="ค้นหาคำสั่งซื้อ..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="pl-10"
+                                />
+                            </div>
 
-                    {/* Status Filters */}
-                    <div className="flex flex-wrap gap-2 md:gap-3">
-                        {statusFilters.map((filter) => (
-                            <button
-                                key={filter.id}
-                                onClick={() => setSelectedStatus(filter.id)}
-                                className={`px-4 md:px-6 py-2 md:py-2.5 rounded-xl font-medium transition-all text-sm md:text-base ${
-                                    selectedStatus === filter.id
-                                        ? 'bg-gray-900 text-white shadow-lg hover:bg-black'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200'
-                                }`}
-                            >
-                                {filter.label} ({filter.count})
-                            </button>
-                        ))}
-                    </div>
+                            {/* Status Filters */}
+                            <div className="flex flex-wrap gap-2">
+                                {statusFilters.map((filter) => (
+                                    <Button
+                                        key={filter.id}
+                                        variant={selectedStatus === filter.id ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setSelectedStatus(filter.id)}
+                                    >
+                                        {filter.label} ({filter.count})
+                                    </Button>
+                                ))}
+                            </div>
+
+                            {/* Select All (only show for pending orders) */}
+                            {selectedStatus === 'pending' && pendingOrders.length > 0 && (
+                                <div className="mt-4 pt-4 border-t">
+                                    <div className="flex items-center gap-2">
+                                        <Checkbox
+                                            id="select-all"
+                                            checked={selectedOrders.length === pendingOrders.length && pendingOrders.length > 0}
+                                            onCheckedChange={toggleSelectAll}
+                                        />
+                                        <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
+                                            เลือกทั้งหมด ({pendingOrders.length} รายการ)
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
                 </motion.div>
 
                 {/* Orders List */}
                 {filteredOrders.length === 0 ? (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.9 }}
+                        initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className="bg-white rounded-2xl shadow-lg border border-gray-100 p-12 text-center"
                     >
-                        <Package className="w-16 h-16 md:w-20 md:h-20 text-gray-300 mx-auto mb-4" />
-                        <h3 className="text-xl md:text-2xl font-semibold text-gray-900 mb-2">
-                            {searchTerm ? 'ไม่พบคำสั่งซื้อ' : 'ยังไม่มีคำสั่งซื้อ'}
-                        </h3>
-                        <p className="text-sm md:text-base text-gray-600">
-                            {searchTerm ? 'ลองค้นหาด้วยคำอื่น' : 'เริ่มประมูลสินค้าที่คุณชอบตอนนี้!'}
-                        </p>
+                        <Card>
+                            <CardContent className="py-12 text-center">
+                                <Package className="w-20 h-20 text-gray-300 mx-auto mb-4" />
+                                <h3 className="text-2xl font-semibold text-gray-900 mb-2">
+                                    {searchTerm ? 'ไม่พบคำสั่งซื้อ' : 'ยังไม่มีคำสั่งซื้อ'}
+                                </h3>
+                                <p className="text-gray-600 mb-6">
+                                    {searchTerm ? 'ลองค้นหาด้วยคำอื่น' : 'เริ่มประมูลสินค้าที่คุณชอบตอนนี้!'}
+                                </p>
+                                <Button onClick={() => navigate('/')}>
+                                    เริ่มประมูล
+                                </Button>
+                            </CardContent>
+                        </Card>
                     </motion.div>
                 ) : (
                     <div className="space-y-4">
                         {filteredOrders.map((order, index) => {
-                            const statusInfo = getStatusInfo(order.status);
-                            const StatusIcon = statusInfo.icon;
+                            const imageUrl = getImageUrl(order);
+                            const isPending = order.status === 'pending';
+                            const isSelected = selectedOrders.includes(order.id);
 
                             return (
                                 <motion.div
                                     key={order.id}
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
-                                    transition={{ delay: index * 0.1 }}
-                                    className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden hover:shadow-xl transition-all"
+                                    transition={{ delay: index * 0.05 }}
                                 >
-                                    {/* Order Header */}
-                                    <div className="bg-gradient-to-r from-gray-50 to-gray-100 px-4 md:px-6 py-3 md:py-4 border-b border-gray-200">
-                                        <div className="flex flex-wrap items-center justify-between gap-2">
-                                            <div className="flex items-center space-x-3">
-                                                <Package className="w-5 h-5 text-gray-900" />
-                                                <span className="text-sm md:text-base font-semibold text-gray-900">
-                                                    คำสั่งซื้อ #{order.id}
-                                                </span>
-                                            </div>
-                                            <div className="flex items-center space-x-3">
-                                                <span className="text-xs md:text-sm text-gray-500">
-                                                    {order.date}
-                                                </span>
-                                                <div className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full border ${statusInfo.color} text-xs md:text-sm font-medium`}>
-                                                    <StatusIcon className="w-3.5 h-3.5 md:w-4 md:h-4" />
-                                                    <span>{statusInfo.label}</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Order Content */}
-                                    <div className="p-4 md:p-6">
-                                        <div className="flex items-start space-x-4">
-                                            {/* Product Image */}
-                                            <div className="w-20 h-20 md:w-28 md:h-28 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border-2 border-gray-100">
-                                                <img
-                                                    src={order.image}
-                                                    alt={order.productName}
-                                                    className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
-                                                />
-                                            </div>
-
-                                            {/* Order Details */}
-                                            <div className="flex-1 min-w-0">
-                                                <h3 className="text-base md:text-xl font-bold text-gray-900 mb-2 line-clamp-2">
-                                                    {order.productName}
-                                                </h3>
-                                                
-                                                <div className="flex flex-wrap items-center gap-4 mb-4">
-                                                    <div className="text-2xl md:text-3xl font-bold text-gray-900">
-                                                        ฿{order.price.toLocaleString()}
+                                    <Card className={`overflow-hidden hover:shadow-lg transition-shadow ${isSelected ? 'ring-2 ring-blue-500' : ''}`}>
+                                        {/* Order Header */}
+                                        <CardHeader className="bg-gray-50 border-b">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    {isPending && (
+                                                        <Checkbox
+                                                            checked={isSelected}
+                                                            onCheckedChange={() => toggleOrderSelection(order.id)}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        />
+                                                    )}
+                                                    <div className="flex items-center gap-2">
+                                                        <Package className="w-5 h-5 text-gray-700" />
+                                                        <span className="font-semibold text-gray-900">
+                                                            คำสั่งซื้อ #{order.id}
+                                                        </span>
                                                     </div>
                                                 </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-sm text-gray-500">
+                                                        {new Date(order.created_at).toLocaleDateString('th-TH', {
+                                                            day: 'numeric',
+                                                            month: 'short',
+                                                            year: 'numeric'
+                                                        })}
+                                                    </span>
+                                                    {getStatusBadge(order)}
+                                                </div>
+                                            </div>
+                                        </CardHeader>
 
-                                                {/* Tracking Info */}
-                                                {order.trackingNumber && (
-                                                    <div className="bg-gray-50 rounded-xl p-3 md:p-4 mb-4 border border-gray-200">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <span className="text-xs md:text-sm font-medium text-gray-700">เลขพัสดุ</span>
-                                                            <button className="text-xs md:text-sm text-gray-900 font-medium hover:text-gray-700">
-                                                                คัดลอก
-                                                            </button>
+                                        {/* Order Content */}
+                                        <CardContent className="p-6">
+                                            <div className="flex gap-4">
+                                                {/* Product Image */}
+                                                <div 
+                                                    className="w-24 h-24 md:w-32 md:h-32 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
+                                                    onClick={() => navigate(`/order/${order.id}`)}
+                                                >
+                                                    <img
+                                                        src={imageUrl}
+                                                        alt={order.product_name}
+                                                        className="w-full h-full object-cover hover:scale-110 transition-transform duration-300"
+                                                        onError={(e) => {
+                                                            e.target.src = 'https://placehold.co/400x400/e5e7eb/9ca3af?text=No+Image';
+                                                        }}
+                                                    />
+                                                </div>
+
+                                                {/* Order Details */}
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="text-lg md:text-xl font-bold text-gray-900 mb-2 line-clamp-2">
+                                                        {order.product_name}
+                                                    </h3>
+                                                    
+                                                    <div className="flex items-baseline gap-3 mb-4">
+                                                        <div className="text-3xl font-bold text-gray-900">
+                                                            ฿{parseFloat(order.total_amount || 0).toLocaleString()}
                                                         </div>
-                                                        <div className="flex items-center space-x-2">
-                                                            <Truck className="w-4 h-4 text-gray-900" />
-                                                            <span className="text-sm md:text-base font-mono font-semibold text-gray-900">
-                                                                {order.trackingNumber}
-                                                            </span>
-                                                        </div>
-                                                        {order.estimatedDelivery && (
-                                                            <p className="text-xs text-gray-600 mt-2">
-                                                                คาดว่าจะถึง: {order.estimatedDelivery}
-                                                            </p>
+                                                        {order.shipping_cost > 0 && (
+                                                            <div className="text-sm text-gray-500">
+                                                                + ค่าจัดส่ง ฿{parseFloat(order.shipping_cost).toLocaleString()}
+                                                            </div>
                                                         )}
                                                     </div>
-                                                )}
 
-                                                {/* Action Buttons */}
-                                                <div className="flex flex-wrap gap-2 md:gap-3">
-                                                    <button className="flex items-center space-x-2 px-4 md:px-6 py-2 md:py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all text-sm md:text-base">
-                                                        <span>ดูรายละเอียด</span>
-                                                        <ChevronRight className="w-4 h-4" />
-                                                    </button>
-                                                    {order.status === 'shipping' && (
-                                                        <button className="flex items-center space-x-2 px-4 md:px-6 py-2 md:py-2.5 border-2 border-gray-900 text-gray-900 rounded-xl font-medium hover:bg-gray-50 transition-all text-sm md:text-base">
-                                                            <Truck className="w-4 h-4" />
-                                                            <span>ติดตามพัสดุ</span>
-                                                        </button>
+                                                    {/* Tracking Info */}
+                                                    {order.tracking_number && (
+                                                        <div className="bg-gray-50 rounded-lg p-4 mb-4 border">
+                                                            <div className="flex items-center justify-between mb-2">
+                                                                <span className="text-sm font-medium text-gray-700">เลขพัสดุ</span>
+                                                                <Button 
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        navigator.clipboard.writeText(order.tracking_number);
+                                                                        toast({
+                                                                            title: "คัดลอกแล้ว",
+                                                                            description: "คัดลอกเลขพัสดุแล้ว"
+                                                                        });
+                                                                    }}
+                                                                >
+                                                                    คัดลอก
+                                                                </Button>
+                                                            </div>
+                                                            <div className="flex items-center gap-2">
+                                                                <Truck className="w-4 h-4 text-gray-700" />
+                                                                <span className="font-mono font-semibold text-gray-900">
+                                                                    {order.tracking_number}
+                                                                </span>
+                                                            </div>
+                                                            {order.shipped_at && (
+                                                                <p className="text-xs text-gray-600 mt-2">
+                                                                    จัดส่งเมื่อ: {new Date(order.shipped_at).toLocaleDateString('th-TH')}
+                                                                </p>
+                                                            )}
+                                                        </div>
                                                     )}
-                                                    {order.status === 'completed' && (
-                                                        <button className="flex items-center space-x-2 px-4 md:px-6 py-2 md:py-2.5 border-2 border-gray-900 text-gray-900 rounded-xl font-medium hover:bg-gray-50 transition-all text-sm md:text-base">
-                                                            <CheckCircle className="w-4 h-4" />
-                                                            <span>รีวิวสินค้า</span>
-                                                        </button>
-                                                    )}
-                                                    {order.status === 'pending' && (
-                                                        <button className="flex items-center space-x-2 px-4 md:px-6 py-2 md:py-2.5 bg-gray-900 hover:bg-black text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all text-sm md:text-base">
-                                                            <span>ชำระเงิน</span>
-                                                        </button>
-                                                    )}
+
+                                                    {/* Action Buttons */}
+                                                    <div className="flex flex-wrap gap-2">
+                                                        <Button 
+                                                            variant="default"
+                                                            onClick={() => navigate(`/order/${order.id}`)}
+                                                        >
+                                                            ดูรายละเอียด
+                                                            <ChevronRight className="w-4 h-4 ml-1" />
+                                                        </Button>
+                                                        {isPending && !isSelected && (
+                                                            <Button 
+                                                                variant="default"
+                                                                className="bg-blue-600 hover:bg-blue-700"
+                                                                onClick={() => navigate(`/payment/${order.id}`)}
+                                                            >
+                                                                <CreditCard className="w-4 h-4 mr-2" />
+                                                                ชำระเงิน
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </div>
+                                        </CardContent>
+                                    </Card>
                                 </motion.div>
                             );
                         })}
@@ -297,36 +400,88 @@ const Orders = () => {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
-                        className="mt-6 bg-gradient-to-r from-gray-900 to-gray-800 rounded-2xl shadow-xl p-6 md:p-8 text-white border border-gray-700"
+                        className="mt-6"
                     >
-                        <h3 className="text-lg md:text-xl font-bold mb-4">สรุปคำสั่งซื้อ</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <div className="text-2xl md:text-3xl font-bold">{orders.length}</div>
-                                <div className="text-xs md:text-sm text-gray-300">คำสั่งซื้อทั้งหมด</div>
-                            </div>
-                            <div>
-                                <div className="text-2xl md:text-3xl font-bold">
-                                    {orders.filter(o => o.status === 'completed').length}
+                        <Card className="bg-gradient-to-r from-gray-900 to-gray-800 text-white border-0">
+                            <CardHeader>
+                                <CardTitle>สรุปคำสั่งซื้อ</CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div>
+                                        <div className="text-3xl font-bold">{orders.length}</div>
+                                        <div className="text-sm text-gray-300">คำสั่งซื้อทั้งหมด</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-3xl font-bold">
+                                            {orders.filter(o => o.tracking_number || o.status === 'confirmed').length}
+                                        </div>
+                                        <div className="text-sm text-gray-300">ยืนยันแล้ว</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-3xl font-bold">
+                                            {orders.filter(o => o.shipped_at).length}
+                                        </div>
+                                        <div className="text-sm text-gray-300">จัดส่งแล้ว</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-3xl font-bold">
+                                            ฿{orders.reduce((sum, order) => sum + parseFloat(order.total_amount || 0), 0).toLocaleString()}
+                                        </div>
+                                        <div className="text-sm text-gray-300">มูลค่าทั้งหมด</div>
+                                    </div>
                                 </div>
-                                <div className="text-xs md:text-sm text-gray-300">จัดส่งสำเร็จ</div>
-                            </div>
-                            <div>
-                                <div className="text-2xl md:text-3xl font-bold">
-                                    {orders.filter(o => o.status === 'shipping').length}
+                            </CardContent>
+                        </Card>
+                    </motion.div>
+                )}
+            </div>
+
+            {/* Floating Action Bar for Bulk Payment */}
+            <AnimatePresence>
+                {selectedOrders.length > 0 && (
+                    <motion.div
+                        initial={{ y: 100, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: 100, opacity: 0 }}
+                        className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl z-50"
+                    >
+                        <div className="max-w-7xl mx-auto px-4 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2">
+                                        <CheckSquare className="w-5 h-5 text-blue-600" />
+                                        <span className="font-semibold text-gray-900">
+                                            เลือกแล้ว {selectedOrders.length} รายการ
+                                        </span>
+                                    </div>
+                                    <div className="text-2xl font-bold text-blue-600">
+                                        ฿{orders
+                                            .filter(o => selectedOrders.includes(o.id))
+                                            .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0)
+                                            .toLocaleString()}
+                                    </div>
                                 </div>
-                                <div className="text-xs md:text-sm text-gray-300">กำลังจัดส่ง</div>
-                            </div>
-                            <div>
-                                <div className="text-2xl md:text-3xl font-bold">
-                                    ฿{orders.reduce((sum, order) => sum + order.price, 0).toLocaleString()}
+                                <div className="flex gap-2">
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={() => setSelectedOrders([])}
+                                    >
+                                        ยกเลิก
+                                    </Button>
+                                    <Button 
+                                        className="bg-blue-600 hover:bg-blue-700"
+                                        onClick={handleBulkPayment}
+                                    >
+                                        <CreditCard className="w-4 h-4 mr-2" />
+                                        ชำระเงินทั้งหมด
+                                    </Button>
                                 </div>
-                                <div className="text-xs md:text-sm text-gray-300">มูลค่าทั้งหมด</div>
                             </div>
                         </div>
                     </motion.div>
                 )}
-            </div>
+            </AnimatePresence>
         </div>
     );
 };
