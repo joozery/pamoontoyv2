@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import apiService from '../../services/api';
-import { CreditCard, Upload, CheckCircle, ArrowLeft, Copy, QrCode, Smartphone, MapPin, ShoppingCart } from 'lucide-react';
+import { CreditCard, Upload, CheckCircle, ArrowLeft, Copy, QrCode, Smartphone, MapPin, ShoppingCart, Star } from 'lucide-react';
 import Swal from 'sweetalert2';
 import generatePayload from 'promptpay-qr';
 import { QRCodeCanvas } from 'qrcode.react';
@@ -34,6 +34,11 @@ export default function Payment() {
   const [discountApplied, setDiscountApplied] = useState(false);
   const [applyingDiscount, setApplyingDiscount] = useState(false);
   const qrRef = useRef();
+  
+  // Review states
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [hoverRating, setHoverRating] = useState(0);
 
   useEffect(() => {
     // Check if this is bulk payment
@@ -265,6 +270,23 @@ export default function Payment() {
           notes,
           shippingAddress: fullAddress,
         });
+        
+        // Submit reviews for bulk orders if rating is provided
+        if (reviewRating > 0) {
+          try {
+            for (const orderItem of orders) {
+              await apiService.reviews.create({
+                order_id: orderItem.id,
+                product_id: orderItem.product_id,
+                rating: reviewRating,
+                comment: reviewComment
+              });
+            }
+          } catch (reviewError) {
+            console.error('Error submitting reviews:', reviewError);
+            // Don't fail the payment if review submission fails
+          }
+        }
       } else {
         await apiService.orders.submitPayment(orderId, {
           paymentMethod,
@@ -272,11 +294,33 @@ export default function Payment() {
           notes,
           shippingAddress: fullAddress,
         });
+        
+        // Submit review if rating is provided
+        if (reviewRating > 0) {
+          try {
+            await apiService.reviews.create({
+              order_id: orderId,
+              product_id: order.product_id,
+              rating: reviewRating,
+              comment: reviewComment
+            });
+          } catch (reviewError) {
+            console.error('Error submitting review:', reviewError);
+            // Don't fail the payment if review submission fails
+          }
+        }
       }
 
+      // Trigger event to update order count in navigation
+      window.dispatchEvent(new Event('orderChanged'));
+      
+      const successMessage = reviewRating > 0 
+        ? 'ส่งหลักฐานและรีวิวสำเร็จ! รอการตรวจสอบจากผู้ขาย'
+        : 'ส่งหลักฐานการชำระเงินสำเร็จ รอการตรวจสอบจากผู้ขาย';
+      
       Swal.fire({
-        title: 'ส่งหลักฐานสำเร็จ!',
-        text: 'ส่งหลักฐานการชำระเงินสำเร็จ รอการตรวจสอบจากผู้ขาย',
+        title: 'สำเร็จ!',
+        text: successMessage,
         icon: 'success',
         confirmButtonText: 'ตกลง',
         confirmButtonColor: '#000'
@@ -322,16 +366,64 @@ export default function Payment() {
     }
   }
   const imageUrl = images[0] || order.product_image || 'https://placehold.co/300x300/1f2937/9ca3af?text=No+Image';
-  const shippingFee = parseFloat(order.shipping_fee || order.shipping_cost || 0);
+  
+  // Calculate shipping with bulk discount (40 baht off for 2nd+ items on same day)
+  const calculateShippingWithDiscount = () => {
+    if (!isBulkPayment || orders.length <= 1) {
+      // Single order - no discount
+      return parseFloat(order?.shipping_fee || order?.shipping_cost || 0);
+    }
+
+    // Group orders by auction end date
+    const ordersByDate = orders.reduce((acc, order) => {
+      const endDate = new Date(order.auction_end).toDateString();
+      if (!acc[endDate]) {
+        acc[endDate] = [];
+      }
+      acc[endDate].push(order);
+      return acc;
+    }, {});
+
+    console.log('📦 Orders grouped by date:', ordersByDate);
+
+    // Calculate shipping for each date group
+    let totalShipping = 0;
+    Object.values(ordersByDate).forEach(dateOrders => {
+      // Sort by shipping fee (descending) to apply discount correctly
+      const sorted = dateOrders.sort((a, b) => {
+        const feeA = parseFloat(a.shipping_fee || a.shipping_cost || 0);
+        const feeB = parseFloat(b.shipping_fee || b.shipping_cost || 0);
+        return feeB - feeA; // Highest first
+      });
+
+      sorted.forEach((order, index) => {
+        const baseFee = parseFloat(order.shipping_fee || order.shipping_cost || 0);
+        if (index === 0) {
+          // First item - full price
+          totalShipping += baseFee;
+          console.log(`📦 Item ${index + 1}: ฿${baseFee} (full price)`);
+        } else {
+          // 2nd+ item - discount 40 baht (but minimum 0)
+          const discountedFee = Math.max(0, baseFee - 40);
+          totalShipping += discountedFee;
+          console.log(`📦 Item ${index + 1}: ฿${baseFee} - ฿40 = ฿${discountedFee}`);
+        }
+      });
+    });
+
+    console.log('📦 Total shipping with discount:', totalShipping);
+    return totalShipping;
+  };
+
+  const shippingFee = isBulkPayment 
+    ? calculateShippingWithDiscount()
+    : parseFloat(order?.shipping_fee || order?.shipping_cost || 0);
+  
   const subtotal = isBulkPayment 
     ? orders.reduce((sum, order) => sum + parseFloat(order.total_amount), 0)
     : parseFloat(order.total_amount);
   
-  const totalShipping = isBulkPayment
-    ? orders.reduce((sum, order) => sum + parseFloat(order.shipping_fee || order.shipping_cost || 0), 0)
-    : shippingFee;
-  
-  const totalAmount = subtotal + totalShipping;
+  const totalAmount = subtotal + shippingFee;
   const finalAmount = totalAmount - discountAmount;
 
   // Generate PromptPay QR Code
@@ -373,37 +465,79 @@ export default function Payment() {
               
               {isBulkPayment ? (
                 <div className="space-y-3">
-                  {orders.map((orderItem, index) => {
-                    let itemImages = [];
-                    if (orderItem.product_images) {
-                      try {
-                        itemImages = typeof orderItem.product_images === 'string' ? JSON.parse(orderItem.product_images) : orderItem.product_images;
-                      } catch (e) {
-                        itemImages = [];
+                  {(() => {
+                    // Group orders by date for shipping calculation display
+                    const ordersByDate = orders.reduce((acc, order) => {
+                      const endDate = new Date(order.auction_end).toDateString();
+                      if (!acc[endDate]) {
+                        acc[endDate] = [];
                       }
-                    }
-                    const itemImageUrl = itemImages[0] || orderItem.product_image || 'https://placehold.co/300x300/1f2937/9ca3af?text=No+Image';
-                    
-                    return (
-                      <div key={orderItem.id} className="flex gap-4 p-3 bg-gray-700/50 rounded-lg">
-                        <img
-                          src={itemImageUrl}
-                          alt={orderItem.product_name}
-                          className="w-16 h-16 object-cover rounded-lg flex-shrink-0 border border-gray-600"
-                          onError={(e) => {
-                            e.target.src = 'https://placehold.co/300x300/1f2937/9ca3af?text=No+Image';
-                          }}
-                        />
-                        <div className="flex-1">
-                          <h3 className="font-medium text-white mb-1">{orderItem.product_name}</h3>
-                          <p className="text-sm text-gray-400">ผู้ขาย: {orderItem.seller_name}</p>
-                          <p className="text-lg font-bold text-white mt-1">
-                            ฿{parseFloat(orderItem.total_amount).toLocaleString()}
-                          </p>
+                      acc[endDate].push(order);
+                      return acc;
+                    }, {});
+
+                    // Sort and flatten orders with shipping info
+                    const ordersWithShipping = [];
+                    Object.values(ordersByDate).forEach(dateOrders => {
+                      const sorted = dateOrders.sort((a, b) => {
+                        const feeA = parseFloat(a.shipping_fee || a.shipping_cost || 0);
+                        const feeB = parseFloat(b.shipping_fee || b.shipping_cost || 0);
+                        return feeB - feeA;
+                      });
+                      sorted.forEach((order, idx) => {
+                        const baseFee = parseFloat(order.shipping_fee || order.shipping_cost || 0);
+                        const actualFee = idx === 0 ? baseFee : Math.max(0, baseFee - 40);
+                        const discount = idx === 0 ? 0 : Math.min(40, baseFee);
+                        ordersWithShipping.push({ ...order, actualFee, discount, baseFee });
+                      });
+                    });
+
+                    return ordersWithShipping.map((orderItem, index) => {
+                      let itemImages = [];
+                      if (orderItem.product_images) {
+                        try {
+                          itemImages = typeof orderItem.product_images === 'string' ? JSON.parse(orderItem.product_images) : orderItem.product_images;
+                        } catch (e) {
+                          itemImages = [];
+                        }
+                      }
+                      const itemImageUrl = itemImages[0] || orderItem.product_image || 'https://placehold.co/300x300/1f2937/9ca3af?text=No+Image';
+                      
+                      return (
+                        <div key={orderItem.id} className="flex gap-4 p-3 bg-gray-700/50 rounded-lg">
+                          <img
+                            src={itemImageUrl}
+                            alt={orderItem.product_name}
+                            className="w-16 h-16 object-cover rounded-lg flex-shrink-0 border border-gray-600"
+                            onError={(e) => {
+                              e.target.src = 'https://placehold.co/300x300/1f2937/9ca3af?text=No+Image';
+                            }}
+                          />
+                          <div className="flex-1">
+                            <h3 className="font-medium text-white mb-1">{orderItem.product_name}</h3>
+                            <p className="text-sm text-gray-400">ผู้ขาย: {orderItem.seller_name}</p>
+                            <div className="mt-1 space-y-0.5">
+                              <p className="text-sm text-white">
+                                ราคาสินค้า: ฿{parseFloat(orderItem.total_amount).toLocaleString()}
+                              </p>
+                              <p className="text-sm text-white flex items-center gap-2">
+                                ค่าส่ง: 
+                                {orderItem.discount > 0 && (
+                                  <span className="text-gray-400 line-through">฿{orderItem.baseFee}</span>
+                                )}
+                                <span className={orderItem.discount > 0 ? 'text-green-400 font-medium' : ''}>
+                                  ฿{orderItem.actualFee}
+                                </span>
+                                {orderItem.discount > 0 && (
+                                  <span className="text-xs text-green-400">(-฿{orderItem.discount})</span>
+                                )}
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
               ) : (
                 <div className="flex gap-4">
@@ -500,8 +634,13 @@ export default function Payment() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-300">ค่าจัดส่ง:</span>
-                      <span className="font-medium text-white">฿{totalShipping.toLocaleString()}</span>
+                      <span className="font-medium text-white">฿{shippingFee.toLocaleString()}</span>
                     </div>
+                    {isBulkPayment && orders.length > 1 && (
+                      <div className="text-xs text-green-400 ml-4">
+                        * ซื้อหลายชิ้นในวันเดียวกัน ลดค่าส่งชิ้นละ 40 บาท
+                      </div>
+                    )}
                     {discountApplied && (
                       <div className="flex justify-between text-green-400">
                         <span className="text-gray-300">ส่วนลด:</span>
@@ -745,6 +884,70 @@ export default function Payment() {
                 />
               </div>
             </div>
+
+            {/* Product Review Section */}
+            <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl shadow-2xl p-6 border border-gray-700">
+              <h2 className="text-lg font-semibold mb-4 text-white flex items-center gap-2">
+                <Star className="w-5 h-5 text-yellow-400" />
+                รีวิวสินค้า (ไม่บังคับ)
+              </h2>
+              <p className="text-sm text-gray-400 mb-4">
+                แบ่งปันประสบการณ์การใช้งานเพื่อช่วยให้ผู้ซื้อคนอื่นตัดสินใจ
+              </p>
+
+              {/* Star Rating */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-300 mb-3">
+                  คะแนนความพึงพอใจ
+                </label>
+                <div className="flex gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setReviewRating(star)}
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      className="transition-transform hover:scale-110 active:scale-95"
+                    >
+                      <Star
+                        className={`w-10 h-10 ${
+                          star <= (hoverRating || reviewRating)
+                            ? 'fill-yellow-400 text-yellow-400'
+                            : 'text-gray-600'
+                        } transition-colors`}
+                      />
+                    </button>
+                  ))}
+                </div>
+                {reviewRating > 0 && (
+                  <p className="text-sm text-yellow-400 mt-2">
+                    {reviewRating === 5 && '⭐ ยอดเยี่ยม!'}
+                    {reviewRating === 4 && '😊 ดีมาก'}
+                    {reviewRating === 3 && '👍 ดี'}
+                    {reviewRating === 2 && '😐 พอใช้'}
+                    {reviewRating === 1 && '😞 ต้องปรับปรุง'}
+                  </p>
+                )}
+              </div>
+
+              {/* Review Comment */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">
+                  รีวิวเพิ่มเติม (ถ้ามี)
+                </label>
+                <textarea
+                  value={reviewComment}
+                  onChange={(e) => setReviewComment(e.target.value)}
+                  rows={4}
+                  className="w-full px-4 py-3 bg-gray-900/50 border border-gray-700 rounded-xl focus:ring-2 focus:ring-gray-600 focus:border-transparent text-white placeholder-gray-500"
+                  placeholder="แชร์ประสบการณ์การใช้งานของคุณ เช่น คุณภาพสินค้า การจัดส่ง บริการ..."
+                />
+                <p className="text-xs text-gray-500 mt-2">
+                  💡 รีวิวของคุณจะช่วยให้ผู้อื่นตัดสินใจได้ง่ายขึ้น และช่วยร้านค้าพัฒนาบริการ
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Sidebar - Summary */}
@@ -758,7 +961,7 @@ export default function Payment() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-400">ค่าจัดส่ง</span>
-                  <span className="font-medium text-white">฿{totalShipping.toLocaleString()}</span>
+                  <span className="font-medium text-white">฿{shippingFee.toLocaleString()}</span>
                 </div>
                 {discountApplied && (
                   <div className="flex justify-between text-sm text-green-400">

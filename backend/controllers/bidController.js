@@ -107,7 +107,7 @@ const placeBid = async (req, res) => {
 
     // Validate bid amount
     const minBidAmount = currentHighestBid 
-      ? parseFloat(currentHighestBid.bid_amount) + parseFloat(product.min_bid_increment || 1)
+      ? parseFloat(currentHighestBid.bid_amount) + parseFloat(product.min_bid_increment || 20)
       : parseFloat(product.starting_price || product.start_price || 0);
 
     if (parseFloat(finalBidAmount) < minBidAmount) {
@@ -313,17 +313,23 @@ const getUserBids = async (req, res) => {
         p.auction_end as auction_end_time,
         p.status as product_status,
         COALESCE(pi.cloudinary_url, p.image_url) as product_image
-      FROM bids b
+      FROM (
+        SELECT 
+          b1.*,
+          ROW_NUMBER() OVER (PARTITION BY b1.product_id ORDER BY b1.bid_time DESC) as rn
+        FROM bids b1
+        WHERE b1.user_id = ?
+      ) b
       LEFT JOIN products p ON b.product_id = p.id
       LEFT JOIN product_images pi ON p.id = pi.product_id AND pi.is_primary = TRUE
-      WHERE b.user_id = ?
+      WHERE b.rn = 1
       ORDER BY b.bid_time DESC
       LIMIT ? OFFSET ?
     `, [userId, parseInt(limit), offset]);
 
-    // Get total count
+    // Get total count (unique products only)
     const [countResult] = await pool.query(`
-      SELECT COUNT(*) as total FROM bids WHERE user_id = ?
+      SELECT COUNT(DISTINCT product_id) as total FROM bids WHERE user_id = ?
     `, [userId]);
 
     const total = countResult[0].total;

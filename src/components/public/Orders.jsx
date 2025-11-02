@@ -101,8 +101,21 @@ const Orders = () => {
     });
 
     const pendingOrders = filteredOrders.filter(o => o.status === 'pending');
+    const hasManyPendingOrders = pendingOrders.length > 1;
+
+    // Auto-select all pending orders if there are multiple
+    useEffect(() => {
+        if (hasManyPendingOrders && selectedOrders.length === 0) {
+            setSelectedOrders(pendingOrders.map(o => o.id));
+        }
+    }, [pendingOrders.length]);
 
     const toggleOrderSelection = (orderId) => {
+        // Prevent individual selection if there are multiple pending orders
+        if (hasManyPendingOrders) {
+            return;
+        }
+        
         setSelectedOrders(prev => 
             prev.includes(orderId) 
                 ? prev.filter(id => id !== orderId)
@@ -163,7 +176,7 @@ const Orders = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 py-6 md:py-12 pb-32 md:pb-12">
+        <div className="min-h-screen bg-gray-50 py-6 md:py-12 pb-40 md:pb-12">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 {/* Header */}
                 <motion.div
@@ -212,16 +225,33 @@ const Orders = () => {
                             {/* Select All (only show for pending orders) */}
                             {selectedStatus === 'pending' && pendingOrders.length > 0 && (
                                 <div className="mt-4 pt-4 border-t">
-                                    <div className="flex items-center gap-2">
-                                        <Checkbox
-                                            id="select-all"
-                                            checked={selectedOrders.length === pendingOrders.length && pendingOrders.length > 0}
-                                            onCheckedChange={toggleSelectAll}
-                                        />
-                                        <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
-                                            เลือกทั้งหมด ({pendingOrders.length} รายการ)
-                                        </label>
-                                    </div>
+                                    {hasManyPendingOrders ? (
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                            <div className="flex items-start gap-3">
+                                                <CreditCard className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                                                <div>
+                                                    <h4 className="font-semibold text-blue-900 mb-1">
+                                                        ชำระเงินรวมทั้งหมด {pendingOrders.length} รายการ
+                                                    </h4>
+                                                    <p className="text-sm text-blue-700">
+                                                        เมื่อมีคำสั่งซื้อรอชำระหลายรายการ จะต้องชำระเงินรวมทั้งหมด 
+                                                        เพื่อรับส่วนลดค่าจัดส่ง 40 บาทสำหรับสินค้าที่ประมูลในวันเดียวกัน
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="select-all"
+                                                checked={selectedOrders.length === pendingOrders.length && pendingOrders.length > 0}
+                                                onCheckedChange={toggleSelectAll}
+                                            />
+                                            <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
+                                                เลือกทั้งหมด ({pendingOrders.length} รายการ)
+                                            </label>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </CardContent>
@@ -268,7 +298,7 @@ const Orders = () => {
                                         <CardHeader className="bg-gray-50 border-b">
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
-                                                    {isPending && (
+                                                    {isPending && !hasManyPendingOrders && (
                                                         <Checkbox
                                                             checked={isSelected}
                                                             onCheckedChange={() => toggleOrderSelection(order.id)}
@@ -373,7 +403,7 @@ const Orders = () => {
                                                             ดูรายละเอียด
                                                             <ChevronRight className="w-4 h-4 ml-1" />
                                                         </Button>
-                                                        {isPending && !isSelected && (
+                                                        {isPending && !hasManyPendingOrders && !isSelected && (
                                                             <Button 
                                                                 variant="default"
                                                                 className="bg-blue-600 hover:bg-blue-700"
@@ -444,15 +474,54 @@ const Orders = () => {
                         initial={{ y: 100, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
                         exit={{ y: 100, opacity: 0 }}
-                        className="fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl z-50"
+                        className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-2xl z-50"
                     >
-                        <div className="max-w-7xl mx-auto px-4 py-4">
-                            <div className="flex items-center justify-between">
+                        <div className="max-w-7xl mx-auto px-4 py-3 md:py-4">
+                            {/* Mobile Layout */}
+                            <div className="md:hidden space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2">
+                                        <CheckSquare className="w-5 h-5 text-blue-600" />
+                                        <span className="font-semibold text-gray-900 text-sm">
+                                            {hasManyPendingOrders ? 'ชำระทั้งหมด' : 'เลือกแล้ว'} {selectedOrders.length} รายการ
+                                        </span>
+                                    </div>
+                                    <div className="text-xl font-bold text-blue-600">
+                                        ฿{orders
+                                            .filter(o => selectedOrders.includes(o.id))
+                                            .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0)
+                                            .toLocaleString()}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    {!hasManyPendingOrders && (
+                                        <Button 
+                                            variant="outline" 
+                                            onClick={() => setSelectedOrders([])}
+                                            className="flex-1"
+                                            size="sm"
+                                        >
+                                            ยกเลิก
+                                        </Button>
+                                    )}
+                                    <Button 
+                                        className={`bg-blue-600 hover:bg-blue-700 ${hasManyPendingOrders ? 'w-full' : 'flex-1'}`}
+                                        onClick={handleBulkPayment}
+                                        size="sm"
+                                    >
+                                        <CreditCard className="w-4 h-4 mr-2" />
+                                        ชำระเงินทั้งหมด
+                                    </Button>
+                                </div>
+                            </div>
+                            
+                            {/* Desktop Layout */}
+                            <div className="hidden md:flex items-center justify-between">
                                 <div className="flex items-center gap-4">
                                     <div className="flex items-center gap-2">
                                         <CheckSquare className="w-5 h-5 text-blue-600" />
                                         <span className="font-semibold text-gray-900">
-                                            เลือกแล้ว {selectedOrders.length} รายการ
+                                            {hasManyPendingOrders ? 'ชำระทั้งหมด' : 'เลือกแล้ว'} {selectedOrders.length} รายการ
                                         </span>
                                     </div>
                                     <div className="text-2xl font-bold text-blue-600">
@@ -463,12 +532,14 @@ const Orders = () => {
                                     </div>
                                 </div>
                                 <div className="flex gap-2">
-                                    <Button 
-                                        variant="outline" 
-                                        onClick={() => setSelectedOrders([])}
-                                    >
-                                        ยกเลิก
-                                    </Button>
+                                    {!hasManyPendingOrders && (
+                                        <Button 
+                                            variant="outline" 
+                                            onClick={() => setSelectedOrders([])}
+                                        >
+                                            ยกเลิก
+                                        </Button>
+                                    )}
                                     <Button 
                                         className="bg-blue-600 hover:bg-blue-700"
                                         onClick={handleBulkPayment}

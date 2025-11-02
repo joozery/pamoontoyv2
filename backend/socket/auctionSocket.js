@@ -11,6 +11,9 @@ export const initializeSocket = (httpServer) => {
     },
     transports: ['websocket', 'polling']
   });
+  
+  // ✅ Return io instance
+  return io;
 
   io.on('connection', (socket) => {
     console.log('🔌 Client connected:', socket.id);

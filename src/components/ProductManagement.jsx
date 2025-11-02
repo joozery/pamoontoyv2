@@ -45,7 +45,8 @@ const ProductManagement = () => {
       const response = await apiService.products.getAll({ 
         page: currentPage,
         limit: itemsPerPage,
-        search: searchTerm 
+        search: searchTerm,
+        status: 'all' // ✅ Admin เห็นทุก status (active, scheduled, ended, sold)
       });
       
       const data = response.data.data || [];

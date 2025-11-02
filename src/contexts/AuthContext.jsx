@@ -97,6 +97,11 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'admin';
   };
 
+  const updateUser = (updatedUserData) => {
+    setUser(updatedUserData);
+    localStorage.setItem('user', JSON.stringify(updatedUserData));
+  };
+
   const value = {
     user,
     token,
@@ -107,6 +112,7 @@ export const AuthProvider = ({ children }) => {
     isAuthenticated,
     isAdmin,
     loadUser,
+    updateUser,
   };
 
   return (

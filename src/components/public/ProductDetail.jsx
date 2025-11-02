@@ -18,7 +18,9 @@ import {
   History,
   ArrowLeft,
   Zap,
-  X
+  X,
+  Trophy,
+  ShoppingCart
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -117,7 +119,7 @@ const CountdownTimer = ({ endTime, currentPrice, userBid, isWon, isBought }) => 
           bgColor: 'bg-gradient-to-br from-yellow-50 to-green-50',
           textColor: 'text-green-600',
           borderColor: 'border-green-300',
-          statusText: '🏆 คุณกำลังชนะ!',
+          statusText: '🏆 คุณกำลังนำ',
           statusBg: 'bg-gradient-to-r from-yellow-500 to-green-500'
         };
       case 'outbid':
@@ -253,8 +255,14 @@ const ProductDetail = () => {
         if (productData.images) {
           if (typeof productData.images === 'string') {
             try {
-              images = JSON.parse(productData.images);
+              const parsedImages = JSON.parse(productData.images);
+              if (Array.isArray(parsedImages) && parsedImages.length > 0) {
+                images = parsedImages;
+              } else {
+                images = [productData.image_url || productData.primary_image];
+              }
             } catch (e) {
+              console.log('Failed to parse images JSON:', e);
               images = [productData.image_url || productData.primary_image];
             }
           } else if (Array.isArray(productData.images)) {
@@ -266,6 +274,12 @@ const ProductDetail = () => {
         if (images.length === 0) {
           images = [productData.image_url || productData.primary_image || 'https://placehold.co/800x800/e5e7eb/9ca3af?text=No+Image'];
         }
+        
+        console.log('🖼️ Product images:', {
+          rawImages: productData.images,
+          parsedImages: images,
+          imageCount: images.length
+        });
 
         const formattedProduct = {
           id: productData.id,
@@ -274,8 +288,8 @@ const ProductDetail = () => {
           currentPrice: parseFloat(productData.current_price || productData.starting_price || 0),
           startPrice: parseFloat(productData.starting_price || 0),
           buyNowPrice: parseFloat(productData.buy_now_price || 0),
-          category: productData.category || 'ไม่ระบุ',
-          condition: productData.condition_status || 'ไม่ระบุ',
+          category: productData.category || null,
+          condition: productData.condition_status || null,
           status: productData.status || 'active',
           seller: {
             name: productData.seller_name || 'ไม่ระบุ',
@@ -291,8 +305,8 @@ const ProductDetail = () => {
           shipping: productData.shipping_cost > 0 ? `฿${parseFloat(productData.shipping_cost).toLocaleString()}` : 'ฟรี',
           shippingCost: parseFloat(productData.shipping_cost || 0),
           location: productData.location || 'ไม่ระบุ',
-          brand: productData.brand || 'ไม่ระบุ',
-          minBidIncrement: parseFloat(productData.min_bid_increment || 10)
+          brand: productData.brand || null,
+          minBidIncrement: parseFloat(productData.min_bid_increment || 20)
         };
         
         // Check if product is sold (bought now)
@@ -301,7 +315,7 @@ const ProductDetail = () => {
         }
 
         setProduct(formattedProduct);
-        setBidAmount((formattedProduct.currentPrice + 100).toString());
+        setBidAmount((formattedProduct.currentPrice + formattedProduct.minBidIncrement).toString());
 
         // Get current user ID ก่อน fetch bid history
         const token = localStorage.getItem('token');
@@ -319,21 +333,30 @@ const ProductDetail = () => {
         // Fetch bid history พร้อม userId
         await refreshBidHistoryWithUserId(userId);
 
-        // Fetch related products
+        // Fetch related products from same seller, sorted by auction ending soon
         try {
           const relatedResponse = await apiService.products.getAll({ 
-            limit: 6, 
-            category: productData.category,
+            limit: 20, // Get more to filter and sort
+            seller_id: productData.seller_id,
             exclude: id,
             status: 'active' // Only show active products
           });
           // Filter to show only active products that are still in auction
-          const activeProducts = (relatedResponse.data.data || []).filter(product => {
+          let activeProducts = (relatedResponse.data.data || []).filter(product => {
             const isActive = product.status === 'active';
             const isStillInAuction = product.auction_end && new Date(product.auction_end) > new Date();
-            return isActive && isStillInAuction;
+            return isActive && isStillInAuction && product.id !== parseInt(id);
           });
-          setRelatedProducts(activeProducts);
+          
+          // Sort by auction ending soon (closest end time first)
+          activeProducts = activeProducts.sort((a, b) => {
+            const endTimeA = new Date(a.auction_end);
+            const endTimeB = new Date(b.auction_end);
+            return endTimeA - endTimeB; // Ascending order (closest first)
+          });
+          
+          // Limit to 6 products
+          setRelatedProducts(activeProducts.slice(0, 6));
         } catch (error) {
           console.error('Error fetching related products:', error);
           setRelatedProducts([]);
@@ -525,7 +548,7 @@ const ProductDetail = () => {
 
   const handleBid = () => {
     // Open popup for bid amount input
-    setPopupBidAmount((product.currentPrice + 100).toString());
+    setPopupBidAmount((product.currentPrice + product.minBidIncrement).toString());
     setShowBidPopup(true);
   };
 
@@ -570,10 +593,13 @@ const ProductDetail = () => {
         setProduct({ ...product, currentPrice: amount, totalBids: product.totalBids + 1 });
       }
 
-      setBidAmount((amount + 100).toString());
+        setBidAmount((amount + product.minBidIncrement).toString());
       setUserBid(amount);
       // Don't set isWon=true here - let refreshBidHistory handle it
       setShowBidPopup(false);
+
+      // Trigger event to update bid count in navigation
+      window.dispatchEvent(new Event('bidChanged'));
 
       // Refresh bid history
       await refreshBidHistory();
@@ -726,7 +752,12 @@ const ProductDetail = () => {
                 />
                 
                 {/* Slide Navigation */}
-                {product.images.length > 1 && (
+                {console.log('🔍 Slide check:', { 
+                  imageCount: product.images?.length, 
+                  isArray: Array.isArray(product.images),
+                  images: product.images 
+                })}
+                {product.images && product.images.length > 1 && (
                   <>
                     {/* Previous Button */}
                     <button
@@ -751,7 +782,7 @@ const ProductDetail = () => {
                 )}
 
                 {/* Image Counter */}
-                {product.images.length > 1 && (
+                {product.images && product.images.length > 1 && (
                   <div className="absolute top-4 left-4 bg-black/50 text-white px-3 py-1 rounded-full text-sm">
                     {selectedImage + 1} / {product.images.length}
                   </div>
@@ -768,7 +799,7 @@ const ProductDetail = () => {
                 </div>
 
                 {/* Dots Indicator */}
-                {product.images.length > 1 && (
+                {product.images && product.images.length > 1 && (
                   <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2">
                     {product.images.map((_, idx) => (
                       <button
@@ -798,18 +829,22 @@ const ProductDetail = () => {
                 const showWonMessage = (isBought || (isWon && auctionEnded));
                 
                 // If product sold but user didn't buy it
-                if (productSold && !isBought) {
+                if (productSold && !isBought && !isWon) {
+                  // Show winner name from bid history
+                  const winnerBid = bidHistory.find(bid => bid.is_winning || bid.bid_amount === product.currentPrice);
+                  const winnerName = winnerBid?.bidder_name || 'ผู้ซื้อ';
+                  
                   return (
-                    <div className="bg-gray-100 rounded-lg p-4 border border-gray-300">
+                    <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                       <div className="text-center">
-                        <div className="w-16 h-16 bg-gray-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                          <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                        <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Trophy className="w-8 h-8 text-yellow-600" />
                         </div>
                         <h3 className="text-lg font-bold text-gray-800 mb-2">สินค้าขายไปแล้ว</h3>
-                        <p className="text-gray-600 text-sm">
-                          สินค้านี้ถูกซื้อในราคา ฿{product.currentPrice.toLocaleString()}
+                        <p className="text-gray-600 text-sm mb-2">ผู้ชนะการประมูล</p>
+                        <p className="text-lg font-bold text-gray-900">{winnerName}</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          ราคา ฿{product.currentPrice.toLocaleString()}
                         </p>
                       </div>
                     </div>
@@ -871,15 +906,21 @@ const ProductDetail = () => {
               
               {/* Tags */}
               <div className="flex flex-wrap gap-2">
-                <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
-                  {product.category}
-                </span>
-                <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
-                  {product.condition}
-                </span>
-                <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
-                  BANDAI
-                </span>
+                {product.category && product.category !== 'ไม่ระบุ' && (
+                  <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
+                    {product.category}
+                  </span>
+                )}
+                {product.condition && product.condition !== 'ไม่ระบุ' && (
+                  <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
+                    {product.condition}
+                  </span>
+                )}
+                {product.brand && product.brand !== 'ไม่ระบุ' && (
+                  <span className="px-3 py-1 bg-gray-900 text-white text-sm rounded-full font-medium">
+                    {product.brand}
+                  </span>
+                )}
               </div>
               
               {/* Shipping Info */}
@@ -921,12 +962,14 @@ const ProductDetail = () => {
                     <p className="text-sm font-medium text-gray-900">{product.brand}</p>
                   </div>
                 )}
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">สภาพสินค้า</p>
-                  <p className="text-sm font-medium text-gray-900">
-                    {product.condition === 'new' ? 'ใหม่' : product.condition === 'like_new' ? 'เหมือนใหม่' : product.condition === 'good' ? 'ดี' : product.condition === 'fair' ? 'พอใช้' : product.condition}
-                  </p>
-                </div>
+                {product.condition && product.condition !== 'ไม่ระบุ' && (
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">สภาพสินค้า</p>
+                    <p className="text-sm font-medium text-gray-900">
+                      {product.condition === 'new' ? 'ใหม่' : product.condition === 'like_new' ? 'เหมือนใหม่' : product.condition === 'good' ? 'ดี' : product.condition === 'fair' ? 'พอใช้' : product.condition}
+                    </p>
+                  </div>
+                )}
                 {product.category && product.category !== 'ไม่ระบุ' && (
                   <div>
                     <p className="text-xs text-gray-500 mb-1">หมวดหมู่</p>
@@ -957,8 +1000,17 @@ const ProductDetail = () => {
               <h2 className="text-lg font-semibold mb-4">ข้อมูลผู้ขาย</h2>
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                    {product.seller.name.charAt(0)}
+                  <div className="w-12 h-12 bg-black rounded-full flex items-center justify-center overflow-hidden">
+                    <img 
+                      src="/pamoontoy.png" 
+                      alt="Pamoontoy Logo"
+                      className="w-full h-full object-contain p-2"
+                      onError={(e) => {
+                        // Fallback to text initial if logo not found
+                        e.target.style.display = 'none';
+                        e.target.parentElement.innerHTML = `<span class="text-white font-bold text-lg">${product.seller.name.charAt(0)}</span>`;
+                      }}
+                    />
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
@@ -1197,7 +1249,7 @@ const ProductDetail = () => {
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
-                  ราคาขั้นต่ำ: ฿{(product.currentPrice + 100).toLocaleString()}
+                  ราคาขั้นต่ำ: ฿{(product.currentPrice + product.minBidIncrement).toLocaleString()}
                 </p>
               </div>
 
@@ -1209,16 +1261,22 @@ const ProductDetail = () => {
                   const showWonMessage = (isBought || (isWon && auctionEnded));
                   
                   // If product is sold but user didn't buy it
-                  if (productSold && !isBought) {
+                  if (productSold && !isBought && !isWon) {
+                    // Show winner name from bid history
+                    const winnerBid = bidHistory.find(bid => bid.is_winning || bid.bid_amount === product.currentPrice);
+                    const winnerName = winnerBid?.bidder_name || 'ผู้ซื้อ';
+                    
                     return (
-                      <div className="text-center py-6 bg-gray-50 rounded-lg">
-                        <div className="w-16 h-16 bg-gray-400 rounded-full flex items-center justify-center mx-auto mb-3">
-                          <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
+                      <div className="text-center py-6 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Trophy className="w-8 h-8 text-yellow-600" />
                         </div>
                         <p className="text-gray-700 font-semibold mb-1">สินค้าขายไปแล้ว</p>
-                        <p className="text-gray-500 text-sm">ไม่สามารถประมูลได้</p>
+                        <p className="text-gray-600 text-sm mb-2">ผู้ชนะการประมูล</p>
+                        <p className="text-lg font-bold text-gray-900">{winnerName}</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          ราคา ฿{product.currentPrice.toLocaleString()}
+                        </p>
                       </div>
                     );
                   }
@@ -1234,10 +1292,24 @@ const ProductDetail = () => {
                       เสนอราคาประมูล
                     </Button>
                   ) : (
-                    <div className="text-center py-4">
-                      <p className="text-gray-600 text-sm">
-                        {isBought ? 'คุณได้ซื้อสินค้านี้แล้ว' : 'คุณชนะการประมูลแล้ว'}
-                      </p>
+                    <div className="space-y-3">
+                      <div className="bg-green-50 border-2 border-green-300 rounded-lg p-4 text-center">
+                        <Trophy className="w-12 h-12 text-green-600 mx-auto mb-2" />
+                        <p className="text-green-700 font-bold text-lg mb-1">
+                          🎉 {isBought ? 'คุณซื้อสินค้านี้แล้ว' : 'คุณชนะการประมูล!'}
+                        </p>
+                        <p className="text-green-600 text-sm">
+                          กรุณาชำระเงินภายใน 24 ชั่วโมง
+                        </p>
+                      </div>
+                      <Button 
+                        onClick={() => navigate('/orders')}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                        size="lg"
+                      >
+                        <ShoppingCart className="w-5 h-5 mr-2" />
+                        ดูคำสั่งซื้อของฉัน
+                      </Button>
                     </div>
                   );
                 })()}
@@ -1318,7 +1390,7 @@ const ProductDetail = () => {
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  ราคาต่ำสุด: ฿{(product.currentPrice + 1).toLocaleString()}
+                  ราคาต่ำสุด: ฿{(product.currentPrice + product.minBidIncrement).toLocaleString()}
                 </p>
                 
                 {/* Quick bid buttons */}

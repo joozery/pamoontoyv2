@@ -21,9 +21,12 @@ import favoriteRoutes from './routes/favoriteRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import discountRoutes from './routes/discountRoutes.js';
+import reviewRoutes from './routes/reviewRoutes.js';
 
 // Import jobs
 import { startAuctionEndJob, checkEndedAuctions, autoExtendAuctions } from './jobs/auctionEndJob.js';
+import { startScheduler } from './schedulers/publishScheduledProducts.js';
+import { socketScheduler } from './schedulers/socketScheduler.js';
 
 // Import WebSocket
 import { initializeSocket } from './socket/auctionSocket.js';
@@ -38,7 +41,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Trust proxy - important for rate limiting behind Nginx
-app.set('trust proxy', true);
+app.set('trust proxy', 1); // Only trust first proxy (Nginx)
 
 // Security middleware
 app.use(helmet());
@@ -105,6 +108,7 @@ app.use('/api/favorites', favoriteRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/discounts', discountRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 // LINE Webhook for automatic admin registration
 app.post('/webhook/line', async (req, res) => {
@@ -239,7 +243,10 @@ const startServer = async () => {
     const httpServer = createServer(app);
     
     // Initialize WebSocket
-    initializeSocket(httpServer);
+    const io = initializeSocket(httpServer);
+    
+    // ✅ ส่ง io instance ให้ socketScheduler
+    socketScheduler.setIO(io);
     
     httpServer.listen(PORT, '0.0.0.0', () => {
       console.log('🚀 Pamoontoy Backend Server Started');
@@ -258,6 +265,8 @@ const startServer = async () => {
       // ✅ Start auction jobs
       console.log('\n🔄 Starting background jobs...');
       startAuctionEndJob();
+      startScheduler(); // Start scheduled products publisher (legacy)
+      socketScheduler.start(); // Start Socket-based scheduler
       
       // ✅ Run immediately on startup
       console.log('🔍 Running initial checks...');

@@ -7,11 +7,14 @@ import apiService from '@/services/api';
 import { useNavigate } from 'react-router-dom';
 
 const Profile = () => {
-    const { user, isAuthenticated } = useAuth();
+    const { user, isAuthenticated, updateUser } = useAuth();
     const navigate = useNavigate();
     const [isEditing, setIsEditing] = useState(false);
     const [showAvatarUpload, setShowAvatarUpload] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [avatarFile, setAvatarFile] = useState(null);
+    const [avatarPreview, setAvatarPreview] = useState(null);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [stats, setStats] = useState({
         totalOrders: 0,
         totalSpent: 0,
@@ -151,6 +154,73 @@ const Profile = () => {
         return `${days} วันที่แล้ว`;
     };
 
+    const handleAvatarChange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                toast({
+                    title: "ไฟล์ใหญ่เกินไป",
+                    description: "กรุณาเลือกไฟล์ที่มีขนาดไม่เกิน 5MB",
+                    variant: "destructive",
+                });
+                return;
+            }
+            setAvatarFile(file);
+            setAvatarPreview(URL.createObjectURL(file));
+        }
+    };
+
+    const handleUploadAvatar = async () => {
+        if (!avatarFile) return;
+
+        try {
+            setUploadingAvatar(true);
+
+            // Upload to Cloudinary
+            const formData = new FormData();
+            formData.append('images', avatarFile);
+
+            const uploadRes = await apiService.upload.images(formData);
+            const avatarUrl = uploadRes.data.urls[0];
+
+            // Update user profile with new avatar_url  
+            const response = await fetch('https://api.pamoontoy.site/api/auth/update-avatar', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify({ avatar_url: avatarUrl })
+            });
+
+            const result = await response.json();
+            if (!result.success) throw new Error('Failed to update avatar');
+
+            // Update local user state
+            if (updateUser) {
+                updateUser({ ...user, avatar_url: avatarUrl });
+            }
+
+            toast({
+                title: "อัพเดทรูปโปรไฟล์สำเร็จ",
+                description: "รูปโปรไฟล์ของคุณได้รับการอัพเดทแล้ว",
+            });
+
+            setShowAvatarUpload(false);
+            setAvatarFile(null);
+            setAvatarPreview(null);
+        } catch (error) {
+            console.error('Error uploading avatar:', error);
+            toast({
+                title: "เกิดข้อผิดพลาด",
+                description: "ไม่สามารถอัพเดทรูปโปรไฟล์ได้",
+                variant: "destructive",
+            });
+        } finally {
+            setUploadingAvatar(false);
+        }
+    };
+
     const handleSave = async () => {
         try {
             // TODO: Implement API call to update user profile
@@ -237,8 +307,22 @@ const Profile = () => {
                             <div className="flex items-center gap-8 md:gap-12 relative z-10">
                                 <div className="relative group flex-shrink-0">
                                     <div className="w-24 h-24 md:w-32 md:h-32 bg-gradient-to-br from-gray-900 to-gray-700 rounded-2xl md:rounded-3xl p-1 shadow-2xl">
-                                        <div className="w-full h-full bg-white rounded-2xl md:rounded-3xl flex items-center justify-center border-2 border-gray-100">
-                                            <User className="w-12 h-12 md:w-16 md:h-16 text-gray-900" />
+                                        <div className="w-full h-full bg-white rounded-2xl md:rounded-3xl flex items-center justify-center border-2 border-gray-100 overflow-hidden">
+                                            {user?.avatar_url ? (
+                                                <img 
+                                                    src={user.avatar_url} 
+                                                    alt="Profile" 
+                                                    className="w-full h-full object-cover"
+                                                    onError={(e) => {
+                                                        e.target.style.display = 'none';
+                                                        e.target.nextSibling.style.display = 'flex';
+                                                    }}
+                                                />
+                                            ) : null}
+                                            <User 
+                                                className="w-12 h-12 md:w-16 md:h-16 text-gray-900" 
+                                                style={{ display: user?.avatar_url ? 'none' : 'block' }}
+                                            />
                                         </div>
                                     </div>
                                     <button 
@@ -578,6 +662,108 @@ const Profile = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Avatar Upload Modal */}
+            <AnimatePresence>
+                {showAvatarUpload && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+                        onClick={() => {
+                            if (!uploadingAvatar) {
+                                setShowAvatarUpload(false);
+                                setAvatarFile(null);
+                                setAvatarPreview(null);
+                            }
+                        }}
+                    >
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-xl font-bold text-gray-900">อัพเดทรูปโปรไฟล์</h3>
+                                <button
+                                    onClick={() => {
+                                        if (!uploadingAvatar) {
+                                            setShowAvatarUpload(false);
+                                            setAvatarFile(null);
+                                            setAvatarPreview(null);
+                                        }
+                                    }}
+                                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                                    disabled={uploadingAvatar}
+                                >
+                                    <X className="w-5 h-5 text-gray-500" />
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                {/* Preview */}
+                                <div className="flex justify-center">
+                                    <div className="relative w-32 h-32">
+                                        <div className="w-full h-full rounded-full bg-gray-100 flex items-center justify-center overflow-hidden border-4 border-gray-200">
+                                            {avatarPreview ? (
+                                                <img src={avatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                                            ) : user?.avatar_url ? (
+                                                <img src={user.avatar_url} alt="Current" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <User className="w-16 h-16 text-gray-400" />
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* File Input */}
+                                <div>
+                                    <label className="block">
+                                        <input
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleAvatarChange}
+                                            className="hidden"
+                                            disabled={uploadingAvatar}
+                                        />
+                                        <div className="flex items-center justify-center gap-2 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg cursor-pointer transition-colors text-sm font-medium">
+                                            <Camera className="w-4 h-4" />
+                                            <span>เลือกรูปภาพ</span>
+                                        </div>
+                                    </label>
+                                    <p className="text-xs text-gray-500 mt-2 text-center">
+                                        รองรับไฟล์ JPG, PNG ขนาดไม่เกิน 5MB
+                                    </p>
+                                </div>
+
+                                {/* Upload Button */}
+                                {avatarFile && (
+                                    <button
+                                        onClick={handleUploadAvatar}
+                                        disabled={uploadingAvatar}
+                                        className="w-full px-4 py-3 bg-gray-900 hover:bg-black text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                    >
+                                        {uploadingAvatar ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                                <span>กำลังอัพโหลด...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Save className="w-4 h-4" />
+                                                <span>บันทึกรูปโปรไฟล์</span>
+                                            </>
+                                        )}
+                                    </button>
+                                )}
+                            </div>
+                        </motion.div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </div>
     );
 };

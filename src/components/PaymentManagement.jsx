@@ -391,38 +391,98 @@ const PaymentManagement = () => {
                 </button>
               </div>
 
+              {/* Product Details */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 mb-4">
+                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  รายการสินค้า
+                </h4>
+                <div className="flex gap-4">
+                  {/* Product Image */}
+                  {selectedOrder.product_image && (
+                    <div className="flex-shrink-0">
+                      <img
+                        src={selectedOrder.product_image}
+                        alt={selectedOrder.product_name}
+                        className="w-24 h-24 object-cover rounded-lg border-2 border-white shadow-md"
+                      />
+                    </div>
+                  )}
+                  {/* Product Info */}
+                  <div className="flex-1 min-w-0">
+                    <h5 className="font-semibold text-gray-900 mb-1 truncate">
+                      {selectedOrder.product_name}
+                    </h5>
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-600">ราคาสินค้า:</span>
+                        <span className="font-medium">{formatCurrency(selectedOrder.total_amount)}</span>
+                      </div>
+                      {selectedOrder.shipping_fee > 0 && (
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-600">ค่าจัดส่ง:</span>
+                          <span className="font-medium">{formatCurrency(selectedOrder.shipping_fee)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between text-sm pt-1 border-t border-gray-200">
+                        <span className="text-gray-700 font-medium">ยอดรวมทั้งหมด:</span>
+                        <span className="font-bold text-lg text-blue-600">
+                          {formatCurrency(parseFloat(selectedOrder.total_amount) + parseFloat(selectedOrder.shipping_fee || 0))}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Order Details */}
               <div className="bg-gray-50 rounded-lg p-4 mb-4 space-y-2">
+                <h4 className="text-sm font-semibold text-gray-700 mb-2">ข้อมูลการสั่งซื้อ</h4>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600">ลูกค้า:</span>
                   <span className="font-medium">{selectedOrder.customer_name}</span>
                 </div>
+                {selectedOrder.customer_email && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">อีเมล:</span>
+                    <span className="font-medium text-xs">{selectedOrder.customer_email}</span>
+                  </div>
+                )}
+                {selectedOrder.customer_phone && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600">เบอร์โทร:</span>
+                    <span className="font-medium">{selectedOrder.customer_phone}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">ยอดชำระ:</span>
-                  <span className="font-semibold text-lg">
-                    {formatCurrency(parseFloat(selectedOrder.total_amount) + parseFloat(selectedOrder.shipping_fee || 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-600">ช่องทาง:</span>
-                  <span>{selectedOrder.payment_method === 'promptpay' ? 'พร้อมเพย์' : 'โอนธนาคาร'}</span>
+                  <span className="text-gray-600">ช่องทางชำระเงิน:</span>
+                  <span className="font-medium">{selectedOrder.payment_method === 'promptpay' ? '💳 พร้อมเพย์' : '🏦 โอนธนาคาร'}</span>
                 </div>
                 {selectedOrder.shipping_address && (
                   <div className="text-sm pt-2 border-t">
-                    <span className="text-gray-600">ที่อยู่จัดส่ง:</span>
-                    <p className="mt-1">{selectedOrder.shipping_address}</p>
+                    <span className="text-gray-600 font-medium">ที่อยู่จัดส่ง:</span>
+                    <p className="mt-1 text-gray-700 leading-relaxed">{selectedOrder.shipping_address}</p>
                   </div>
                 )}
               </div>
 
               {/* Payment Slip Image */}
               {selectedOrder.payment_slip && (
-                <div className="border rounded-lg overflow-hidden">
-                  <img
-                    src={selectedOrder.payment_slip}
-                    alt="Payment Slip"
-                    className="w-full h-auto"
-                  />
+                <div className="space-y-2">
+                  <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                    <CreditCard className="w-4 h-4" />
+                    หลักฐานการโอนเงิน
+                  </h4>
+                  <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-white">
+                    <img
+                      src={selectedOrder.payment_slip}
+                      alt="Payment Slip"
+                      className="w-full h-auto"
+                      onClick={() => window.open(selectedOrder.payment_slip, '_blank')}
+                      style={{ cursor: 'zoom-in' }}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 text-center">คลิกที่รูปเพื่อดูขนาดเต็ม</p>
                 </div>
               )}
 

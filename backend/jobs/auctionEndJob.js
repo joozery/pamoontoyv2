@@ -7,7 +7,7 @@ export const autoExtendAuctions = async () => {
   try {
     console.log('⏰ Checking for auctions to auto-extend...');
     
-    // หาสินค้าที่เพิ่งหมดเวลา (ภายใน 1 นาที) และมี bid อยู่
+    // หาสินค้าที่เพิ่งหมดเวลา (ภายใน 2 นาที) และมี bid อยู่
     const [endedAuctions] = await pool.query(`
       SELECT 
         p.id as product_id,
@@ -15,7 +15,8 @@ export const autoExtendAuctions = async () => {
         p.auction_end,
         p.auction_start,
         p.bid_count,
-        COUNT(b.id) as total_bids
+        COUNT(b.id) as total_bids,
+        MAX(b.bid_time) as last_bid_time
       FROM products p
       LEFT JOIN bids b ON p.id = b.product_id
       WHERE p.status = 'active'
@@ -31,11 +32,29 @@ export const autoExtendAuctions = async () => {
       return;
     }
     
-    console.log(`🔄 Found ${endedAuctions.length} auctions to extend`);
+    console.log(`🔄 Found ${endedAuctions.length} auctions to check`);
     
-    // ขยายเวลาแต่ละประมูล +5 นาที
+    // ตรวจสอบแต่ละประมูล
     for (const auction of endedAuctions) {
       try {
+        const now = new Date();
+        const auctionEnd = new Date(auction.auction_end);
+        const lastBidTime = auction.last_bid_time ? new Date(auction.last_bid_time) : null;
+        
+        // คำนวณว่า bid สุดท้ายเกิดขึ้นก่อนหมดเวลากี่นาที
+        const minutesSinceLastBid = lastBidTime ? 
+          (auctionEnd - lastBidTime) / (1000 * 60) : Infinity;
+        
+        console.log(`🔍 Product ${auction.product_id}: Last bid was ${minutesSinceLastBid.toFixed(1)} minutes before auction end`);
+        
+        // ✅ เงื่อนไข: ถ้า bid สุดท้ายเกิดก่อนหมดเวลา > 5 นาที → ไม่ต่อเวลา ปิดเลย
+        if (minutesSinceLastBid > 5) {
+          console.log(`❌ No bids in last 5 minutes for product ${auction.product_id} - Closing auction`);
+          // ไม่ต่อเวลา ให้ job checkEndedAuctions สร้าง order ต่อ
+          continue;
+        }
+        
+        // ✅ ถ้า bid สุดท้ายอยู่ใน 5 นาทีสุดท้าย → ต่อเวลา +5 นาที
         const newAuctionEnd = new Date(Date.now() + 5 * 60 * 1000); // +5 minutes from now
         
         await pool.query(
@@ -64,12 +83,12 @@ export const autoExtendAuctions = async () => {
   }
 };
 
-// ✅ Auto-create orders for ended auctions (ที่ไม่มีคนประมูลใน 5 นาที)
+// ✅ Auto-create orders for ended auctions (ทันทีที่หมดเวลา)
 export const checkEndedAuctions = async () => {
   try {
     console.log('🔍 Checking for ended auctions to close...');
     
-    // หาสินค้าที่หมดเวลาประมูลแล้ว (เกิน 5 นาที) แต่ยัง status = 'active'
+    // หาสินค้าที่หมดเวลาประมูลแล้ว (เกิน 1 นาที เพื่อให้แน่ใจว่าไม่มีการต่อเวลา) แต่ยัง status = 'active'
     const [endedAuctions] = await pool.query(`
       SELECT 
         p.id as product_id,
@@ -83,7 +102,7 @@ export const checkEndedAuctions = async () => {
       LEFT JOIN bids b ON p.id = b.product_id AND b.is_winning = TRUE
       WHERE p.status = 'active'
         AND p.auction_end IS NOT NULL
-        AND p.auction_end <= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+        AND p.auction_end <= DATE_SUB(NOW(), INTERVAL 1 MINUTE)
         AND b.user_id IS NOT NULL
       ORDER BY p.auction_end ASC
     `);
@@ -159,12 +178,13 @@ export const startAuctionEndJob = () => {
     await autoExtendAuctions();
   });
   
-  // 2. Create orders: เช็คทุก 2 นาที
-  cron.schedule('*/2 * * * *', async () => {
+  // 2. Create orders: เช็คทุก 1 นาที (เร็วขึ้นเพื่อสร้าง order เร็วขึ้น)
+  cron.schedule('*/1 * * * *', async () => {
     await checkEndedAuctions();
   });
   
   console.log('✅ Auction jobs started:');
   console.log('   ⏰ Auto-extend: every 1 minute');
-  console.log('   📦 Create orders: every 2 minutes');
+  console.log('   📦 Create orders: every 1 minute');
 };
+

@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 const Favorites = () => {
     const { isAuthenticated } = useAuth();
     const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
-    const [sortBy, setSortBy] = useState('recent'); // 'recent', 'price-low', 'price-high', 'ending-soon'
+    const [sortBy, setSortBy] = useState('ending-soon'); // Default: sort by ending soon
     const [favorites, setFavorites] = useState([]);
     const [loading, setLoading] = useState(true);
 
@@ -26,7 +26,19 @@ const Favorites = () => {
             setLoading(true);
             const response = await apiService.favorites.getAll();
             const favoritesData = response.data.data || [];
-            setFavorites(favoritesData);
+            
+            // Filter out products that have ended
+            const now = new Date();
+            const activeFavorites = favoritesData.filter(item => {
+                // Keep items without auction_end
+                if (!item.auction_end) return true;
+                
+                // Keep items that haven't ended yet
+                const endTime = new Date(item.auction_end);
+                return endTime > now;
+            });
+            
+            setFavorites(activeFavorites);
         } catch (error) {
             console.error('Error fetching favorites:', error);
             toast({
@@ -47,6 +59,8 @@ const Favorites = () => {
                 title: "ลบออกจากรายการโปรด",
                 description: "ลบสินค้าออกจากรายการโปรดแล้ว"
             });
+            // Trigger event to update favorite count in navigation
+            window.dispatchEvent(new Event('favoriteChanged'));
         } catch (error) {
             console.error('Error removing favorite:', error);
             toast({

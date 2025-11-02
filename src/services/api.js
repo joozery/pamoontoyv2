@@ -159,6 +159,20 @@ export const apiService = {
     validate: (code) => api.get(`/api/discounts/validate/${code}`),
   },
 
+  // Reviews
+  reviews: {
+    // Public
+    getProductReviews: (productId, params) => api.get(`/api/reviews/products/${productId}`, { params }),
+    // User
+    create: (data) => api.post('/api/reviews', data),
+    getUserReviews: () => api.get('/api/reviews/user/my-reviews'),
+    canReview: (orderId) => api.get(`/api/reviews/check/${orderId}`),
+    // Admin
+    getAllAdmin: (params) => api.get('/api/reviews/admin/all', { params }),
+    updateStatus: (id, data) => api.put(`/api/reviews/admin/${id}`, data),
+    delete: (id) => api.delete(`/api/reviews/admin/${id}`),
+  },
+
   // Health check
   health: () => api.get('/health'),
 };

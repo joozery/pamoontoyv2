@@ -18,12 +18,19 @@ const getAllProducts = async (req, res) => {
     let whereClause = 'WHERE 1=1';
     const params = [];
 
+    // ✅ ถ้าไม่ได้ระบุ status ให้แสดงเฉพาะ active products
+    if (!status) {
+      whereClause += ' AND p.status = ?';
+      params.push('active');
+    }
+
     if (category) {
-      whereClause += ' AND p.category = ?';
+      whereClause += ' AND p.category_id = ?';
       params.push(category);
     }
 
-    if (status) {
+    // ✅ ถ้า status = 'all' ให้แสดงทุก status (สำหรับ admin)
+    if (status && status !== 'all') {
       whereClause += ' AND p.status = ?';
       params.push(status);
     }
@@ -108,12 +115,45 @@ const getProductById = async (req, res) => {
       });
     }
 
-    // Get product images
-    const [images] = await pool.query(`
+    // Get product images from both sources
+    const [productImages] = await pool.query(`
       SELECT * FROM product_images
       WHERE product_id = ?
       ORDER BY sort_order, created_at
     `, [id]);
+
+    // Parse images from products.images field (JSON)
+    let imagesArray = [];
+    if (products[0].images) {
+      if (typeof products[0].images === 'string') {
+        try {
+          imagesArray = JSON.parse(products[0].images);
+        } catch (e) {
+          console.log('Failed to parse images JSON:', e);
+        }
+      } else if (Array.isArray(products[0].images)) {
+        imagesArray = products[0].images;
+      }
+    }
+
+    // If no images from JSON, use product_images table
+    if (imagesArray.length === 0 && productImages.length > 0) {
+      imagesArray = productImages.map(img => img.cloudinary_url || img.image_url);
+    }
+
+    // If still no images, use image_url
+    if (imagesArray.length === 0 && products[0].image_url) {
+      imagesArray = [products[0].image_url];
+    }
+
+    console.log('🔍 API Debug:', {
+      productId: id,
+      rawImages: products[0].images,
+      parsedImages: imagesArray,
+      productImagesTable: productImages,
+      imageUrl: products[0].image_url,
+      finalImages: imagesArray
+    });
 
     // Get recent bids
     const [bids] = await pool.query(`
@@ -129,7 +169,7 @@ const getProductById = async (req, res) => {
 
     const product = {
       ...products[0],
-      images,
+      images: imagesArray,
       recent_bids: bids
     };
 
@@ -190,7 +230,7 @@ const createProduct = async (req, res) => {
     const brand = req.body.brand || null;
     const shipping_cost = req.body.shipping_cost || req.body.shippingCost || null;
     const location = req.body.location || null;
-    const min_bid_increment = req.body.min_bid_increment || req.body.minBidIncrement || 10;
+    const min_bid_increment = req.body.min_bid_increment || req.body.minBidIncrement || 20;
 
     console.log('✅ Parsed values:', {
       name,
@@ -232,15 +272,15 @@ const createProduct = async (req, res) => {
         name, description, starting_price, current_price, buy_now_price, min_bid_increment,
         category_id, brand, shipping_cost, location,
         condition_status, status, seller_id, auction_start, auction_end,
-        image_url, images
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        image_url, images, scheduled_publish_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       name,
       description || '',
       parseFloat(starting_price) || 0,
       parseFloat(current_price) || parseFloat(starting_price) || 0,
       buy_now_price ? parseFloat(buy_now_price) : null,
-      parseFloat(min_bid_increment) || 10,
+      parseFloat(min_bid_increment) || 20,
       category_id || null,
       brand,
       shipping_cost ? parseFloat(shipping_cost) : 0,
@@ -252,7 +292,8 @@ const createProduct = async (req, res) => {
       auction_start || toMySQLDateTime(new Date()),
       auction_end || toMySQLDateTime(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
       image_url,
-      images_json
+      images_json,
+      req.body.scheduled_publish_at ? toMySQLDateTime(req.body.scheduled_publish_at) : null
     ]);
 
     const productId = result.insertId;
@@ -328,7 +369,7 @@ const updateProduct = async (req, res) => {
     const allowedColumns = [
       'name', 'description', 'starting_price', 'current_price', 'buy_now_price', 'min_bid_increment',
       'reserve_price', 'category_id', 'brand', 'shipping_cost', 'location',
-      'condition_status', 'status', 'auction_start', 'auction_end', 'images', 'image_url'
+      'condition_status', 'status', 'auction_start', 'auction_end', 'images', 'image_url', 'scheduled_publish_at'
     ];
 
     Object.keys(updateData).forEach(key => {

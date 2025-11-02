@@ -31,7 +31,7 @@ const ProductEdit = () => {
     description: '',
     startPrice: '',
     price: '',
-    minBidIncrement: '10',
+    minBidIncrement: '20',
     condition: 'new',
     status: 'active',
     category: '',
@@ -48,6 +48,7 @@ const ProductEdit = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewImages, setPreviewImages] = useState([]);
+  const [categories, setCategories] = useState([]);
 
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -75,6 +76,25 @@ const ProductEdit = () => {
       fetchProduct();
     }
   }, [user, isAuthenticated, navigate, id, authLoading]);
+
+  // Fetch categories
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await apiService.categories.getAll();
+        setCategories(response.data.data || []);
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+        toast({
+          title: "เกิดข้อผิดพลาด",
+          description: "ไม่สามารถโหลดหมวดหมู่ได้",
+          variant: "destructive"
+        });
+      }
+    };
+
+    fetchCategories();
+  }, []);
 
   const fetchProduct = async () => {
     try {
@@ -131,7 +151,7 @@ const ProductEdit = () => {
         description: productData.description || '',
         startPrice: productData.starting_price || '',
         price: productData.buy_now_price || '',
-        minBidIncrement: productData.min_bid_increment || '10',
+        minBidIncrement: productData.min_bid_increment || '20',
         condition: productData.condition_status || 'new',
         status: productData.status || 'active',
         category: productData.category || productData.category_id || '',
@@ -239,11 +259,27 @@ const ProductEdit = () => {
         ? dayjs.tz(formData.auction.endTime, 'Asia/Bangkok').utc().format()
         : null;
       
+      // ✅ ตรวจสอบว่า auction_start เป็นอนาคตหรือไม่
+      const nowBangkok = dayjs.tz(new Date(), 'Asia/Bangkok');
+      const auctionStartTime = formData.auction.startTime 
+        ? dayjs.tz(formData.auction.startTime, 'Asia/Bangkok')
+        : nowBangkok;
+      const isFutureStart = auctionStartTime.isAfter(nowBangkok.add(1, 'minute')); // เพิ่ม buffer 1 นาที
+      
+      // ✅ ถ้า auction_start เป็นอนาคต → scheduled, ไม่งั้นใช้ status เดิม
+      const productStatus = isFutureStart ? 'scheduled' : formData.status;
+      const scheduledPublishUTC = isFutureStart ? auctionStartUTC : null;
+      
       console.log('🕐 Auction Times (Edit):', {
+        nowBangkok: nowBangkok.format(),
         startTimeInput: formData.auction.startTime,
         endTimeInput: formData.auction.endTime,
+        auctionStartTime: auctionStartTime.format(),
+        isFutureStart: isFutureStart,
         startTimeUTC: auctionStartUTC,
-        endTimeUTC: auctionEndUTC
+        endTimeUTC: auctionEndUTC,
+        status: productStatus,
+        scheduledPublishUTC: scheduledPublishUTC
       });
       
       const productData = {
@@ -252,13 +288,14 @@ const ProductEdit = () => {
         starting_price: parseFloat(formData.startPrice),
         current_price: parseFloat(formData.startPrice),
         buy_now_price: formData.price ? parseFloat(formData.price) : null,
-        min_bid_increment: formData.minBidIncrement ? parseFloat(formData.minBidIncrement) : 10,
+        min_bid_increment: formData.minBidIncrement ? parseFloat(formData.minBidIncrement) : 20,
         condition_status: formData.condition,
-        status: formData.status,
+        status: productStatus,
         category_id: formData.category ? parseInt(formData.category) : null,
         brand: formData.brand || null,
         shipping_cost: formData.shippingCost ? parseFloat(formData.shippingCost) : null,
         location: formData.location || null,
+        scheduled_publish_at: scheduledPublishUTC,
         auction_start: auctionStartUTC,
         auction_end: auctionEndUTC,
         images: formData.images,
@@ -431,12 +468,18 @@ const ProductEdit = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="category">หมวดหมู่</Label>
-                  <Input
-                    id="category"
-                    value={formData.category}
-                    onChange={(e) => handleInputChange('category', e.target.value)}
-                    placeholder="กรอกหมวดหมู่"
-                  />
+                  <Select value={formData.category} onValueChange={(value) => handleInputChange('category', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="เลือกหมวดหมู่" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id.toString()}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">

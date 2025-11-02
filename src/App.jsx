@@ -15,6 +15,12 @@ import Search from '@/components/public/Search';
 import ProductDetail from '@/components/public/ProductDetail';
 import MyBids from '@/components/public/MyBids';
 import Payment from '@/components/public/Payment';
+import HowToBid from '@/components/public/HowToBid';
+import ContactUs from '@/components/public/ContactUs';
+import FAQ from '@/components/public/FAQ';
+import PrivacyPolicy from '@/components/public/PrivacyPolicy';
+import Terms from '@/components/public/Terms';
+import Sitemap from '@/components/public/Sitemap';
 import Login from '@/components/Login';
 import Dashboard from '@/components/Dashboard';
 import ProductManagement from '@/components/ProductManagement';
@@ -26,7 +32,7 @@ import PaymentManagement from '@/components/PaymentManagement';
 import AdminUserManagement from '@/components/AdminUserManagement';
 import DiscountManagement from '@/components/DiscountManagement';
 import ContactMessages from '@/components/ContactMessages';
-import CategoryManagement from '@/components/CategoryManagement';
+import CategoryManagement from '@/components/admin/CategoryManagement';
 import ReviewManagement from '@/components/ReviewManagement';
 
 function App() {
@@ -42,6 +48,12 @@ function App() {
           <Route path="/" element={<PublicLayout />}>
             <Route index element={<Home />} />
             <Route path="search" element={<Search />} />
+            <Route path="how-to-bid" element={<HowToBid />} />
+            <Route path="contact" element={<ContactUs />} />
+            <Route path="faq" element={<FAQ />} />
+            <Route path="privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="terms" element={<Terms />} />
+            <Route path="sitemap" element={<Sitemap />} />
             <Route path="profile" element={<Profile />} />
             <Route path="orders" element={<Orders />} />
             <Route path="order/:id" element={<OrderDetail />} />

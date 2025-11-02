@@ -205,6 +205,57 @@ router.get('/me', async (req, res) => {
   }
 });
 
+// Update avatar
+router.put('/update-avatar', async (req, res) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied. No token provided.'
+      });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    const { avatar_url } = req.body;
+
+    if (!avatar_url) {
+      return res.status(400).json({
+        success: false,
+        message: 'Avatar URL is required'
+      });
+    }
+
+    // Update avatar_url in database
+    await pool.query(
+      'UPDATE users SET avatar_url = ? WHERE id = ?',
+      [avatar_url, decoded.id]
+    );
+
+    // Get updated user
+    const [users] = await pool.query(
+      'SELECT id, name, email, phone, role, level, total_orders, total_spent, won_auctions, avatar_url, created_at FROM users WHERE id = ?',
+      [decoded.id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Avatar updated successfully',
+      user: users[0]
+    });
+  } catch (error) {
+    console.error('Update avatar error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating avatar',
+      error: error.message
+    });
+  }
+});
+
 export default router;
 
 

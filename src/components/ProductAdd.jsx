@@ -30,7 +30,7 @@ const ProductAdd = () => {
     description: '',
     startPrice: '',
     price: '',
-    minBidIncrement: '10',
+    minBidIncrement: '20',
     condition: 'new',
     status: 'active',
     category: '',
@@ -46,6 +46,7 @@ const ProductAdd = () => {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewImages, setPreviewImages] = useState([]);
+  const [categories, setCategories] = useState([]);
 
   const { user, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
@@ -70,6 +71,25 @@ const ProductAdd = () => {
     }
   }, [user, isAuthenticated, navigate, loading]);
 
+  // Fetch categories
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await apiService.categories.getAll();
+        setCategories(response.data.data || []);
+      } catch (error) {
+        console.error('Error fetching categories:', error);
+        toast({
+          title: "เกิดข้อผิดพลาด",
+          description: "ไม่สามารถโหลดหมวดหมู่ได้",
+          variant: "destructive"
+        });
+      }
+    };
+
+    fetchCategories();
+  }, []);
+
   const handleInputChange = (field, value) => {
     if (field.includes('.')) {
       const [parent, child] = field.split('.');
@@ -93,35 +113,37 @@ const ProductAdd = () => {
 
     setUploading(true);
     try {
-      const uploadPromises = Array.from(files).map(async (file) => {
-        const uploadFormData = new FormData();
+      // Upload all images at once
+      const uploadFormData = new FormData();
+      Array.from(files).forEach((file) => {
         uploadFormData.append('images', file);
-
-        const response = await apiService.upload.images(uploadFormData);
-        
-        if (response.data.success && response.data.urls && response.data.urls.length > 0) {
-          return response.data.urls[0];
-        } else {
-          throw new Error('Upload failed');
-        }
       });
 
-      const uploadedUrls = await Promise.all(uploadPromises);
-      setFormData(prev => ({
-        ...prev,
-        images: [...prev.images, ...uploadedUrls]
-      }));
-      setPreviewImages(prev => [...prev, ...uploadedUrls]);
+      console.log('📤 Uploading', files.length, 'images...');
+      const response = await apiService.upload.images(uploadFormData);
       
-      toast({
-        title: "อัปโหลดสำเร็จ",
-        description: `อัปโหลด ${uploadedUrls.length} รูปภาพแล้ว`,
-      });
+      if (response.data.success && response.data.urls && response.data.urls.length > 0) {
+        const uploadedUrls = response.data.urls;
+        
+        setFormData(prev => ({
+          ...prev,
+          images: [...prev.images, ...uploadedUrls]
+        }));
+        setPreviewImages(prev => [...prev, ...uploadedUrls]);
+        
+        console.log('✅ Uploaded successfully:', uploadedUrls);
+        toast({
+          title: "อัปโหลดสำเร็จ",
+          description: `อัปโหลด ${uploadedUrls.length} รูปภาพแล้ว`,
+        });
+      } else {
+        throw new Error('Upload failed - No URLs returned');
+      }
     } catch (error) {
-      console.error('Error uploading images:', error);
+      console.error('❌ Error uploading images:', error);
       toast({
         title: "เกิดข้อผิดพลาด",
-        description: error.message || "ไม่สามารถอัปโหลดรูปภาพได้ กรุณาลองใหม่อีกครั้ง",
+        description: error.response?.data?.message || error.message || "ไม่สามารถอัปโหลดรูปภาพได้ กรุณาลองใหม่อีกครั้ง",
         variant: "destructive"
       });
     } finally {
@@ -151,11 +173,27 @@ const ProductAdd = () => {
         ? dayjs.tz(formData.auction.endTime, 'Asia/Bangkok').utc().format()
         : dayjs().add(7, 'day').utc().format();
       
-      console.log('🕐 Auction Times:', {
+      // ✅ ตรวจสอบว่า auction_start เป็นอนาคตหรือไม่
+      const nowBangkok = dayjs.tz(new Date(), 'Asia/Bangkok');
+      const auctionStartTime = formData.auction.startTime 
+        ? dayjs.tz(formData.auction.startTime, 'Asia/Bangkok')
+        : nowBangkok;
+      const isFutureStart = auctionStartTime.isAfter(nowBangkok.add(1, 'minute')); // เพิ่ม buffer 1 นาที
+      
+      // ✅ ถ้า auction_start เป็นอนาคต → scheduled, ไม่งั้น active
+      const productStatus = isFutureStart ? 'scheduled' : 'active';
+      const scheduledPublishUTC = isFutureStart ? auctionStartUTC : null;
+      
+      console.log('🕐 Times:', {
+        nowBangkok: nowBangkok.format(),
         startTimeInput: formData.auction.startTime,
         endTimeInput: formData.auction.endTime,
+        auctionStartTime: auctionStartTime.format(),
+        isFutureStart: isFutureStart,
         startTimeUTC: auctionStartUTC,
-        endTimeUTC: auctionEndUTC
+        endTimeUTC: auctionEndUTC,
+        status: productStatus,
+        scheduledPublishUTC: scheduledPublishUTC
       });
       
       const productData = {
@@ -164,13 +202,14 @@ const ProductAdd = () => {
         starting_price: parseFloat(formData.startPrice),
         current_price: parseFloat(formData.startPrice),
         buy_now_price: formData.price ? parseFloat(formData.price) : null,
-        min_bid_increment: formData.minBidIncrement ? parseFloat(formData.minBidIncrement) : 10,
+        min_bid_increment: formData.minBidIncrement ? parseFloat(formData.minBidIncrement) : 20,
         condition_status: formData.condition,
-        status: formData.status,
+        status: productStatus,
         category_id: formData.category ? parseInt(formData.category) : null,
         brand: formData.brand || null,
         shipping_cost: formData.shippingCost ? parseFloat(formData.shippingCost) : null,
         location: formData.location || null,
+        scheduled_publish_at: scheduledPublishUTC,
         auction_start: auctionStartUTC,
         auction_end: auctionEndUTC,
         images: formData.images,
@@ -343,12 +382,18 @@ const ProductAdd = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="category">หมวดหมู่</Label>
-                  <Input
-                    id="category"
-                    value={formData.category}
-                    onChange={(e) => handleInputChange('category', e.target.value)}
-                    placeholder="กรอกหมวดหมู่"
-                  />
+                  <Select value={formData.category} onValueChange={(value) => handleInputChange('category', value)}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="เลือกหมวดหมู่" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((category) => (
+                        <SelectItem key={category.id} value={category.id.toString()}>
+                          {category.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="space-y-2">
@@ -390,25 +435,43 @@ const ProductAdd = () => {
               </div>
 
               {/* Auction Time */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label htmlFor="startTime">วันที่เริ่มประมูล</Label>
-                  <Input
-                    id="startTime"
-                    type="datetime-local"
-                    value={formData.auction.startTime}
-                    onChange={(e) => handleInputChange('auction.startTime', e.target.value)}
-                  />
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start gap-2">
+                    <span className="text-blue-600 text-lg">💡</span>
+                    <div className="text-sm text-blue-800">
+                      <strong>การตั้งเวลาแบบอัตโนมัติ:</strong>
+                      <ul className="list-disc ml-4 mt-1 space-y-1">
+                        <li>ถ้า <strong>วันที่เริ่มประมูล</strong> เป็นเวลาในอนาคต → สินค้าจะ <span className="font-semibold">ซ่อนไว้</span> และแสดงเมื่อถึงเวลา</li>
+                        <li>ถ้า <strong>วันที่เริ่มประมูล</strong> เป็นตอนนี้หรือเวลาที่ผ่านมา → สินค้าจะ <span className="font-semibold">แสดงทันที</span></li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label htmlFor="startTime" className="flex items-center gap-2">
+                      วันที่เริ่มประมูล
+                      <span className="text-xs text-blue-600 font-normal">(ใช้เป็นเวลาโพสต์ด้วย)</span>
+                    </Label>
+                    <Input
+                      id="startTime"
+                      type="datetime-local"
+                      value={formData.auction.startTime}
+                      onChange={(e) => handleInputChange('auction.startTime', e.target.value)}
+                    />
+                  </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="endTime">วันที่สิ้นสุดประมูล</Label>
-                  <Input
-                    id="endTime"
-                    type="datetime-local"
-                    value={formData.auction.endTime}
-                    onChange={(e) => handleInputChange('auction.endTime', e.target.value)}
-                  />
+                  <div className="space-y-2">
+                    <Label htmlFor="endTime">วันที่สิ้นสุดประมูล</Label>
+                    <Input
+                      id="endTime"
+                      type="datetime-local"
+                      value={formData.auction.endTime}
+                      onChange={(e) => handleInputChange('auction.endTime', e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
 

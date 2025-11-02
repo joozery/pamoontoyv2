@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from '@/components/ui/use-toast';
 import { Heart, Clock, Gavel } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import SplitText from '../SplitText';
 import LiquidEther from '@/components/LiquidEther';
 import { useProducts } from '@/hooks/useProducts';
@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
+import { io } from 'socket.io-client';
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -198,6 +199,8 @@ const ProductCard = ({ product, isHorizontalScroll = false, favoriteIds = [], us
           title: "ลบออกจากรายการโปรด",
           description: "ลบสินค้าออกจากรายการโปรดแล้ว"
         });
+        // Trigger event to update favorite count in navigation
+        window.dispatchEvent(new Event('favoriteChanged'));
       } else {
         // Add to favorites
         await apiService.favorites.add(product.id);
@@ -206,6 +209,8 @@ const ProductCard = ({ product, isHorizontalScroll = false, favoriteIds = [], us
           title: "เพิ่มในรายการโปรด",
           description: "เพิ่มสินค้าในรายการโปรดแล้ว"
         });
+        // Trigger event to update favorite count in navigation
+        window.dispatchEvent(new Event('favoriteChanged'));
       }
     } catch (error) {
       console.error('Error toggling favorite:', error);
@@ -421,6 +426,9 @@ const ProductCard = ({ product, isHorizontalScroll = false, favoriteIds = [], us
 };
 
 const Home = () => {
+    const [searchParams] = useSearchParams();
+    const selectedCategory = searchParams.get('category');
+    const [categories, setCategories] = useState([]); // ✅ เพิ่ม categories state
     const [viewHistory, setViewHistory] = useState([]);
     const [viewHistoryLoading, setViewHistoryLoading] = useState(false);
     const [displayedProducts, setDisplayedProducts] = useState([]);
@@ -430,15 +438,194 @@ const Home = () => {
     const [favoriteIds, setFavoriteIds] = useState([]);
     const [userBidIds, setUserBidIds] = useState([]);
     const [hiddenProductIds, setHiddenProductIds] = useState(new Set()); // สินค้าที่ต้องซ่อน
+    const [reviews, setReviews] = useState([]);
+    const [reviewsLoading, setReviewsLoading] = useState(true);
     const { products, loading, error, fetchProducts } = useProducts();
     const { isAuthenticated } = useAuth();
+    const socketRef = useRef(null);
 
-    // Initialize displayed products
+    // ✅ Fetch categories on mount
+    useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                const response = await apiService.categories.getAll();
+                setCategories(response.data.data || []);
+            } catch (error) {
+                console.error('Failed to fetch categories:', error);
+            }
+        };
+        fetchCategories();
+    }, []);
+
+    // ✅ Fetch reviews on mount
+    useEffect(() => {
+        const fetchReviews = async () => {
+            try {
+                setReviewsLoading(true);
+                // Get all reviews from admin endpoint (show approved reviews only)
+                const response = await apiService.reviews.getAllAdmin({ limit: 20, status: 'approved' });
+                const reviewsData = response.data.data || [];
+                
+                // Format reviews data
+                const formattedReviews = reviewsData.map(review => ({
+                    id: review.id,
+                    text: review.comment || 'ไม่มีความคิดเห็น',
+                    avatar: review.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(review.user_name || 'User')}&background=random`,
+                    name: review.user_name || 'ผู้ใช้ไม่ระบุชื่อ',
+                    role: review.product_name || 'ลูกค้า',
+                    rating: review.rating
+                }));
+                
+                setReviews(formattedReviews);
+            } catch (error) {
+                console.error('Failed to fetch reviews:', error);
+                // If error, set empty array (don't show error to user)
+                setReviews([]);
+            } finally {
+                setReviewsLoading(false);
+            }
+        };
+        fetchReviews();
+    }, []);
+
+    // Fetch products when category changes
+    useEffect(() => {
+        const params = {};
+        if (selectedCategory) {
+            // ✅ หา category_id จาก category name
+            const categoryObj = categories.find(cat => cat.name === selectedCategory);
+            if (categoryObj) {
+                params.category = categoryObj.id; // ส่ง category_id แทน category name
+            }
+        }
+        fetchProducts(params);
+    }, [selectedCategory, categories]);
+
+    // Initialize displayed products and sort by ending soon
     useEffect(() => {
         if (products.length > 0) {
-            setDisplayedProducts(products);
+            // Sort products by auction_end_time (ending soon first)
+            const sortedProducts = [...products].sort((a, b) => {
+                // Products without auction_end go to the end
+                if (!a.auction_end) return 1;
+                if (!b.auction_end) return -1;
+                
+                const endTimeA = new Date(a.auction_end);
+                const endTimeB = new Date(b.auction_end);
+                return endTimeA - endTimeB; // Ascending (closest first)
+            });
+            setDisplayedProducts(sortedProducts);
         }
     }, [products]);
+
+    // WebSocket connection (run once)
+    useEffect(() => {
+        const socket = io(import.meta.env.VITE_API_URL || 'https://api.pamoontoy.site', {
+            transports: ['websocket', 'polling']
+        });
+
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            console.log('🔌 WebSocket connected on Home page');
+        });
+
+        // Listen for new bids
+        socket.on('new_bid', (data) => {
+            console.log('📊 New bid received:', data);
+            setDisplayedProducts(prev => 
+                prev.map(product => 
+                    product.id === data.productId 
+                        ? { 
+                            ...product, 
+                            current_price: data.currentPrice,
+                            bid_count: data.bidCount,
+                            auction_end: data.newAuctionEnd || product.auction_end
+                          }
+                        : product
+                )
+            );
+        });
+
+        // Listen for auction time extended
+        socket.on('auction_extended', (data) => {
+            console.log('⏰ Auction extended:', data);
+            setDisplayedProducts(prev => 
+                prev.map(product => 
+                    product.id === data.productId 
+                        ? { ...product, auction_end: data.newAuctionEnd }
+                        : product
+                )
+            );
+            
+            toast({
+                title: "⏰ ขยายเวลาประมูล!",
+                description: `สินค้า ID #${data.productId} ถูกขยายเวลาออกไปอีก 5 นาที`,
+                duration: 3000
+            });
+        });
+
+        // Listen for product published (scheduled products)
+        socket.on('product_published', (data) => {
+            console.log('📦 Product published:', data);
+            // Refresh products to show newly published item
+            fetchProducts();
+        });
+
+        // Listen for products updated
+        socket.on('products_updated', (data) => {
+            console.log('🔄 Products updated:', data);
+            if (data.type === 'product_published') {
+                fetchProducts();
+            }
+        });
+
+        socket.on('disconnect', () => {
+            console.log('🔌 WebSocket disconnected from Home page');
+        });
+
+        // Cleanup on unmount
+        return () => {
+            socket.disconnect();
+            socketRef.current = null;
+        };
+    }, []); // Run once
+
+    // Join/Leave auction rooms when products change
+    useEffect(() => {
+        const socket = socketRef.current;
+        if (!socket) return;
+
+        const joinRooms = () => {
+            if (!socket.connected) return;
+            
+            // Join all active auction rooms
+            displayedProducts.forEach(product => {
+                if (product.status === 'active') {
+                    socket.emit('join_auction', product.id);
+                    console.log(`🚪 Joined auction room: ${product.id} - ${product.name}`);
+                }
+            });
+        };
+
+        // Join rooms if already connected
+        if (socket.connected) {
+            joinRooms();
+        }
+
+        // Also join when socket connects (in case connection happens after products load)
+        socket.on('connect', joinRooms);
+
+        // Cleanup: leave rooms when component unmounts or products change
+        return () => {
+            socket.off('connect', joinRooms);
+            displayedProducts.forEach(product => {
+                if (product.status === 'active') {
+                    socket.emit('leave_auction', product.id);
+                }
+            });
+        };
+    }, [displayedProducts]);
 
     // Load more products
     const loadMoreProducts = async () => {
@@ -484,7 +671,7 @@ const Home = () => {
         return () => window.removeEventListener('scroll', handleScroll);
     }, [handleScroll]);
 
-    // ✅ Auto-hide sold/ended products after 2-3 minutes
+    // ✅ Auto-hide sold/ended products after 5 minutes
     useEffect(() => {
         const checkAndHideInactiveProducts = () => {
             const now = new Date();
@@ -494,15 +681,34 @@ const Home = () => {
                 const isSold = product.status === 'sold';
                 const isEnded = product.status === 'active' && product.auction_end && new Date(product.auction_end) <= now;
                 
-                if (isSold || isEnded) {
-                    // ตรวจสอบว่าสินค้านี้ขายไปหรือสิ้นสุดเมื่อไหร่
-                    const endTime = new Date(product.auction_end || product.updated_at);
+                if (isSold) {
+                    // For sold items, use updated_at as reference
+                    // Since status changed to 'sold' when it was purchased
+                    const soldTime = new Date(product.updated_at);
+                    const timeSinceSold = now - soldTime;
+                    
+                    // Hide after 5 minutes
+                    const hideAfterMs = 300000; // 5 นาที (300 วินาที)
+                    
+                    // Debug log (can be removed later)
+                    if (isSold && timeSinceSold < hideAfterMs) {
+                        console.log(`🔍 Sold Product #${product.id}: Will hide in ${Math.ceil((hideAfterMs - timeSinceSold) / 1000)}s`);
+                    }
+                    
+                    if (timeSinceSold >= hideAfterMs) {
+                        console.log(`🗑️ Hiding sold product #${product.id}`);
+                        newHiddenIds.add(product.id);
+                    }
+                } else if (isEnded) {
+                    // For ended auctions, use auction_end as reference
+                    const endTime = new Date(product.auction_end);
                     const timeSinceEnd = now - endTime;
                     
-                    // ถ้าผ่านไป 2-3 นาที (120-180 วินาที) ให้ซ่อน
-                    const hideAfterMs = 150000; // 2.5 นาที (150 วินาที)
+                    // Hide after 5 minutes
+                    const hideAfterMs = 300000; // 5 นาที (300 วินาที)
                     
                     if (timeSinceEnd >= hideAfterMs) {
+                        console.log(`🗑️ Hiding ended product #${product.id}`);
                         newHiddenIds.add(product.id);
                     }
                 }
@@ -510,11 +716,12 @@ const Home = () => {
             
             if (newHiddenIds.size !== hiddenProductIds.size) {
                 setHiddenProductIds(newHiddenIds);
+                console.log(`✅ Updated hidden products: ${newHiddenIds.size} items hidden`);
             }
         };
         
-        // เช็คทุก 30 วินาที
-        const interval = setInterval(checkAndHideInactiveProducts, 30000);
+        // เช็คทุก 10 วินาที (เร็วขึ้นเพื่อให้ทำงานแม่นยำกว่า)
+        const interval = setInterval(checkAndHideInactiveProducts, 10000);
         checkAndHideInactiveProducts(); // เช็คทันทีตอนโหลดหน้า
         
         return () => clearInterval(interval);
@@ -629,7 +836,7 @@ const Home = () => {
                     <div className="relative z-10">
                       <div className="pointer-events-none">
                         <SplitText
-                          text="การประมูลสุดพิเศษ"
+                          text="ยินดีต้อนรับสู่ PAMOONTOY"
                           tag="h1"
                           className="text-5xl md:text-7xl font-bold tracking-tight text-white drop-shadow-2xl"
                           delay={50}
@@ -668,13 +875,13 @@ const Home = () => {
                         className="flex flex-wrap items-center justify-center gap-4 mt-8 pointer-events-auto"
                       >
                         <Link
-                          to="/"
+                          to="/how-to-bid"
                           className="group relative inline-flex items-center justify-center px-8 py-3 text-base font-semibold text-black bg-white rounded-full overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 hover:bg-gray-100"
                         >
                           <span className="relative z-10">วิธีการประมูล</span>
                         </Link>
                         <Link
-                          to="/"
+                          to="/search"
                           className="group relative inline-flex items-center justify-center px-8 py-3 text-base font-semibold text-white bg-white/10 backdrop-blur-sm border-2 border-white/20 rounded-full overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 hover:bg-white/20"
                         >
                           <span className="relative z-10">ดูการประมูล</span>
@@ -689,7 +896,6 @@ const Home = () => {
                 <section className="mb-3 md:hidden">
                     <div className="flex justify-between items-center mb-1">
                         <h2 className="font-medium text-[10px] text-gray-500">ประวัติการเข้าชม</h2>
-                        <button onClick={() => handleActionClick('สินค้าเพิ่มเติม')} className="text-blue-400 text-[9px] font-normal">สินค้าเพิ่มเติม &gt;</button>
                     </div>
                     {viewHistoryLoading ? (
                         <div className="flex space-x-1.5 overflow-x-auto pb-0.5 -mx-3 px-3">
@@ -716,13 +922,24 @@ const Home = () => {
                 {/* Recommended For You - Grid */}
                 <section className="md:hidden">
                     <h2 className="font-bold text-sm mb-2">สินค้าแนะนำสำหรับคุณ</h2>
-                    <div className="grid grid-cols-3 gap-3">
-                        {displayedProducts
-                            .filter(product => !hiddenProductIds.has(product.id))
-                            .map(product => (
-                                <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
-                            ))}
-                    </div>
+                    {displayedProducts.filter(product => !hiddenProductIds.has(product.id)).length === 0 ? (
+                        <div className="text-center py-12">
+                            <div className="text-gray-400 mb-2">
+                                <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                                </svg>
+                            </div>
+                            <p className="text-gray-500 text-sm">ไม่มีสินค้าในหมวดหมู่นี้</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-3 gap-3">
+                            {displayedProducts
+                                .filter(product => !hiddenProductIds.has(product.id))
+                                .map(product => (
+                                    <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
+                                ))}
+                        </div>
+                    )}
                     {/* Loading indicator for infinite scroll */}
                     {loadingMore && (
                         <div className="mt-4 text-center">
@@ -739,13 +956,25 @@ const Home = () => {
                         <h2 className="text-2xl font-bold text-gray-900">สินค้าประมูล</h2>
                         <p className="text-gray-600 text-sm mt-1">ร่วมประมูลสินค้าคุณภาพในราคาพิเศษ</p>
                     </div>
-                    <div className="grid grid-cols-5 gap-4">
-                        {displayedProducts
-                            .filter(product => !hiddenProductIds.has(product.id))
-                            .map((product) => (
-                                <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
-                            ))}
-                    </div>
+                    {displayedProducts.filter(product => !hiddenProductIds.has(product.id)).length === 0 ? (
+                        <div className="text-center py-16">
+                            <div className="text-gray-400 mb-3">
+                                <svg className="mx-auto h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                                </svg>
+                            </div>
+                            <p className="text-gray-600 text-lg font-medium">ไม่มีสินค้าในหมวดหมู่นี้</p>
+                            <p className="text-gray-500 text-sm mt-2">กรุณาเลือกหมวดหมู่อื่น หรือดูสินค้าทั้งหมด</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-5 gap-4">
+                            {displayedProducts
+                                .filter(product => !hiddenProductIds.has(product.id))
+                                .map((product) => (
+                                    <ProductCard key={product.id} product={product} favoriteIds={favoriteIds} userBidIds={userBidIds} />
+                                ))}
+                        </div>
+                    )}
                     {/* Load More Button - Desktop */}
                     {/* Loading indicator for infinite scroll */}
                     {loadingMore && (
@@ -765,69 +994,21 @@ const Home = () => {
             <div className="hidden md:block bg-white py-20">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="text-center mb-12">
-                        <h2 className="text-4xl font-bold text-gray-900 mb-3">เสียงจากผู้ใช้งาน</h2>
-                        <p className="text-gray-600 text-lg">ประสบการณ์การประมูลที่พวกเขาประทับใจ</p>
+                        <h2 className="text-4xl font-bold text-gray-900 mb-3">รีวิวจากลูกค้า</h2>
+                        <p className="text-gray-600 text-lg">ทุกรีวิวของทุกคน คือกำลังใจของพวกเรา</p>
                     </div>
                     
-                    <div className="flex overflow-x-auto gap-6 pb-6 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
-                        {[
-                            {
-                                id: 1,
-                                text: "ประทับใจระบบการประมูลมาก ใช้งานง่าย รวดเร็ว และได้สินค้าที่ต้องการในราคาที่ดี ประมูลได้ฟิกเกอร์หายากที่หามานาน จะมาใช้บริการอีกแน่นอน",
-                                avatar: "https://randomuser.me/api/portraits/men/32.jpg",
-                                name: "สมชาย วงศ์ทอง",
-                                role: "นักสะสมฟิกเกอร์"
-                            },
-                            {
-                                id: 2,
-                                text: "PAMOON เป็นแพลตฟอร์มที่ดีที่สุดสำหรับนักสะสม มีของหายาก ของสะสมเยอะมาก ระบบการประมูลโปร่งใส เชื่อถือได้ แนะนำเลยครับ",
-                                avatar: "https://randomuser.me/api/portraits/women/44.jpg",
-                                name: "วิภาวี ใจดี",
-                                role: "นักสะสมของเล่น"
-                            },
-                            {
-                                id: 3,
-                                text: "ใช้งานง่าย ไม่ซับซ้อน การประมูลเป็นไปอย่างยุติธรรม ทีมงานดูแลดีมาก ตอบคำถามเร็ว สินค้าที่ได้มีคุณภาพตามที่แจ้งไว้ ประทับใจครับ",
-                                avatar: "https://randomuser.me/api/portraits/men/75.jpg",
-                                name: "ธนพล สุขสันต์",
-                                role: "นักสะสมการ์ดเกม"
-                            },
-                            {
-                                id: 4,
-                                text: "ได้สินค้าที่ชอบในราคาที่คุ้มค่า ระบบการประมูลทำงานได้ดีมาก ไม่มีปัญหา การจัดส่งรวดเร็ว สินค้าบรรจุภัณฑ์ดี ปลอดภัย",
-                                avatar: "https://randomuser.me/api/portraits/women/68.jpg",
-                                name: "นภัสสร ศรีสุข",
-                                role: "นักสะสมโมเดล"
-                            },
-                            {
-                                id: 5,
-                                text: "เว็บไซต์ใช้งานง่าย ค้นหาสินค้าสะดวก มีหมวดหมู่ให้เลือกเยอะ ประมูลได้สินค้าที่ต้องการหลายชิ้น พอใจมากครับ",
-                                avatar: "https://randomuser.me/api/portraits/men/46.jpg",
-                                name: "ประเสริฐ มั่นคง",
-                                role: "นักสะสมหนังสือ"
-                            },
-                            {
-                                id: 6,
-                                text: "บริการดีเยี่ยม ระบบการประมูลมีความยุติธรรม ไม่มีการโกง ได้ของสะสมหายากที่หามานาน ขอบคุณ PAMOON มากครับ",
-                                avatar: "https://randomuser.me/api/portraits/women/29.jpg",
-                                name: "สุภาพร แก้วใส",
-                                role: "นักสะสมของโบราณ"
-                            },
-                            {
-                                id: 7,
-                                text: "ราคาดี คุณภาพดี ประมูลได้สินค้าในราคาที่ต่ำกว่าตลาด แต่ได้ของแท้ มีใบรับรอง แนะนำให้เพื่อนๆ มาใช้บริการ",
-                                avatar: "https://randomuser.me/api/portraits/men/52.jpg",
-                                name: "วิชัย ทองคำ",
-                                role: "นักสะสมของวินเทจ"
-                            },
-                            {
-                                id: 8,
-                                text: "ประมูลครั้งแรกกับ PAMOON ได้สินค้าที่ต้องการเลย ระบบแจ้งเตือนทำงานดี ไม่พลาดการประมูล บริการหลังการขายก็ดีมาก",
-                                avatar: "https://randomuser.me/api/portraits/women/65.jpg",
-                                name: "กนกวรรณ สว่างใจ",
-                                role: "นักสะสมเครื่องเล่น"
-                            }
-                        ].map((review) => (
+                    {reviewsLoading ? (
+                        <div className="flex justify-center items-center py-20">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900"></div>
+                        </div>
+                    ) : reviews.length === 0 ? (
+                        <div className="text-center py-20">
+                            <p className="text-gray-500">ยังไม่มีรีวิว</p>
+                        </div>
+                    ) : (
+                        <div className="flex overflow-x-auto gap-6 pb-6 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
+                            {reviews.map((review) => (
                             <motion.div
                                 key={review.id}
                                 initial={{ opacity: 0, y: 20 }}
@@ -853,8 +1034,9 @@ const Home = () => {
                                     </div>
                                 </div>
                             </motion.div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -862,69 +1044,21 @@ const Home = () => {
             <div className="md:hidden bg-gradient-to-b from-gray-50 to-white py-10">
                 <div className="px-4">
                     <div className="text-center mb-6">
-                        <h2 className="text-xl font-bold text-gray-900 mb-1">เสียงจากผู้ใช้งาน</h2>
-                        <p className="text-gray-600 text-xs">ประสบการณ์ที่ประทับใจ</p>
+                        <h2 className="text-xl font-bold text-gray-900 mb-1">รีวิวจากลูกค้า</h2>
+                        <p className="text-gray-600 text-xs">ทุกรีวิวของทุกคน คือกำลังใจของพวกเรา</p>
                     </div>
                     
-                    <div className="flex overflow-x-auto gap-3 pb-4 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
-                        {[
-                            {
-                                id: 1,
-                                text: "ประทับใจระบบการประมูล ใช้งานง่ายมาก ได้สินค้าในราคาที่ดี",
-                                avatar: "https://randomuser.me/api/portraits/men/32.jpg",
-                                name: "สมชาย วงศ์ทอง",
-                                role: "นักสะสมฟิกเกอร์"
-                            },
-                            {
-                                id: 2,
-                                text: "PAMOON เป็นแพลตฟอร์มที่ดี มีของหายาก ระบบโปร่งใส เชื่อถือได้",
-                                avatar: "https://randomuser.me/api/portraits/women/44.jpg",
-                                name: "วิภาวี ใจดี",
-                                role: "นักสะสมของเล่น"
-                            },
-                            {
-                                id: 3,
-                                text: "ใช้งานง่าย การประมูลยุติธรรม ทีมงานดูแลดี ตอบคำถามเร็ว",
-                                avatar: "https://randomuser.me/api/portraits/men/75.jpg",
-                                name: "ธนพล สุขสันต์",
-                                role: "นักสะสมการ์ดเกม"
-                            },
-                            {
-                                id: 4,
-                                text: "ได้สินค้าที่ชอบในราคาคุ้มค่า ระบบทำงานดี การจัดส่งรวดเร็ว",
-                                avatar: "https://randomuser.me/api/portraits/women/68.jpg",
-                                name: "นภัสสร ศรีสุข",
-                                role: "นักสะสมโมเดล"
-                            },
-                            {
-                                id: 5,
-                                text: "เว็บไซต์ใช้งานง่าย ค้นหาสะดวก มีหมวดหมู่ให้เลือกเยอะ",
-                                avatar: "https://randomuser.me/api/portraits/men/46.jpg",
-                                name: "ประเสริฐ มั่นคง",
-                                role: "นักสะสมหนังสือ"
-                            },
-                            {
-                                id: 6,
-                                text: "บริการดีเยี่ยม ระบบยุติธรรม ได้ของสะสมหายาก ขอบคุณมากครับ",
-                                avatar: "https://randomuser.me/api/portraits/women/29.jpg",
-                                name: "สุภาพร แก้วใส",
-                                role: "นักสะสมของโบราณ"
-                            },
-                            {
-                                id: 7,
-                                text: "ราคาดี คุณภาพดี ประมูลได้ของแท้ในราคาที่ต่ำกว่าตลาด",
-                                avatar: "https://randomuser.me/api/portraits/men/52.jpg",
-                                name: "วิชัย ทองคำ",
-                                role: "นักสะสมของวินเทจ"
-                            },
-                            {
-                                id: 8,
-                                text: "ประมูลครั้งแรกได้สินค้าเลย ระบบแจ้งเตือนดี บริการดีมาก",
-                                avatar: "https://randomuser.me/api/portraits/women/65.jpg",
-                                name: "กนกวรรณ สว่างใจ",
-                                role: "นักสะสมเครื่องเล่น"
-                            }
-                        ].map((review) => (
+                    {reviewsLoading ? (
+                        <div className="flex justify-center items-center py-10">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                        </div>
+                    ) : reviews.length === 0 ? (
+                        <div className="text-center py-10">
+                            <p className="text-gray-500 text-sm">ยังไม่มีรีวิว</p>
+                        </div>
+                    ) : (
+                        <div className="flex overflow-x-auto gap-3 pb-4 hide-scrollbar snap-x snap-mandatory scroll-smooth -mx-4 px-4">
+                            {reviews.map((review) => (
                             <div
                                 key={review.id}
                                 className="flex-shrink-0 w-[280px] snap-start bg-white border border-gray-200 rounded-xl p-4 shadow-sm"
@@ -946,8 +1080,9 @@ const Home = () => {
                                     </div>
                                 </div>
                             </div>
-                        ))}
-                    </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

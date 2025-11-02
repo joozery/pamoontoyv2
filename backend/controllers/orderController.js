@@ -49,6 +49,7 @@ export const getOrderById = async (req, res) => {
         p.image_url as product_image,
         p.images as product_images,
         p.condition_status,
+        p.auction_end,
         u.name as seller_name,
         u.email as seller_email,
         u.phone as seller_phone
